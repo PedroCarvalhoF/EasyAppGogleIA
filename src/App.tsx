@@ -28,22 +28,26 @@ import {
   Ruler,
   Tag,
   Box,
-  ChevronLeft
+  Users,
+  ChevronLeft,
+  Truck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Category, UnitOfMeasure, Branch, PriceCategory, ProductPrice } from './types';
+import { Product, Category, UnitOfMeasure, Branch, PriceCategory, ProductPrice, UsuarioPdv, LinkedUser } from './types';
 
 // Mock Data
 const INITIAL_CATEGORIES: Category[] = [];
 
-type View = 'products' | 'auth' | 'branches';
+type View = 'products' | 'auth' | 'branches' | 'people';
 type ProductSubView = 'menu' | 'list' | 'categories' | 'units' | 'prices' | 'stock' | 'priceCategories' | 'assignPrices';
+type PeopleSubView = 'menu' | 'posUsers' | 'customers' | 'suppliers';
 
 const API_BASE_URL = 'https://2d4l53ph-7141.brs.devtunnels.ms';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('auth');
   const [productSubView, setProductSubView] = useState<ProductSubView>('menu');
+  const [peopleSubView, setPeopleSubView] = useState<PeopleSubView>('menu');
   const [user, setUser] = useState<{ name: string; email: string; token: string } | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [showPassword, setShowPassword] = useState(false);
@@ -184,6 +188,16 @@ export default function App() {
   const [isPriceCategoryModalOpen, setIsPriceCategoryModalOpen] = useState(false);
   const [editingPriceCategory, setEditingPriceCategory] = useState<PriceCategory | null>(null);
 
+  // POS Users State
+  const [posUsers, setPosUsers] = useState<UsuarioPdv[]>([]);
+  const [posUserSearch, setPosUserSearch] = useState('');
+  const [isPosUserModalOpen, setIsPosUserModalOpen] = useState(false);
+  const [linkedUsers, setLinkedUsers] = useState<LinkedUser[]>([]);
+  const [selectedLinkedUserId, setSelectedLinkedUserId] = useState('');
+  const [posUserNickname, setPosUserNickname] = useState('');
+  const [posUserPassword, setPosUserPassword] = useState<number>(0);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
   // Product Prices State
   const [productPrices, setProductPrices] = useState<ProductPrice[]>([]);
   const [productPriceSearch, setProductPriceSearch] = useState('');
@@ -274,6 +288,129 @@ export default function App() {
     } catch (error) {
       console.error('Erro ao salvar categoria de preço:', error);
       alert('Erro de conexão com o servidor');
+    }
+  };
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // POS Users API Handlers
+  const fetchPosUsers = useCallback(async () => {
+    if (!user?.token) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/usuariopdv`, {
+        headers: {
+          'Authorization': `Bearer ${user.token}`
+        }
+      });
+      const result = await response.json();
+      if (result.status && Array.isArray(result.data)) {
+        setPosUsers(result.data);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar usuários PDV:', error);
+    }
+  }, [user?.token]);
+
+  useEffect(() => {
+    if (currentView === 'people' && peopleSubView === 'posUsers' && user) {
+      fetchPosUsers();
+    }
+  }, [currentView, peopleSubView, user, fetchPosUsers]);
+
+  const filteredPosUsers = useMemo(() => {
+    return posUsers.filter(u => 
+      (u.usuarioCaixaPdvEntityNome || '').toLowerCase().includes((posUserSearch || '').toLowerCase()) ||
+      (u.email || '').toLowerCase().includes((posUserSearch || '').toLowerCase()) ||
+      (u.apelidoOperadorCaixa || '').toLowerCase().includes((posUserSearch || '').toLowerCase())
+    );
+  }, [posUsers, posUserSearch]);
+
+  const fetchLinkedUsers = useCallback(async () => {
+    if (!user?.token) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/usuarioclientevinculo/select-usuarios-vinculados-by-cliente-id`, {
+        headers: {
+          'Authorization': `Bearer ${user.token}`
+        }
+      });
+      const result = await response.json();
+      if (result.status && Array.isArray(result.data)) {
+        setLinkedUsers(result.data);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar usuários vinculados:', error);
+    }
+  }, [user?.token]);
+
+  const handleSavePosUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.token || !selectedLinkedUserId) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/usuariopdv/cadastrar-usuario-pdv`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          usuarioCaixaPdvEntityId: selectedLinkedUserId,
+          senhaUsuarioPdv: posUserPassword,
+          apelidoOperadorCaixa: posUserNickname
+        })
+      });
+      const result = await response.json();
+      if (result.status) {
+        setToast({ message: 'Usuário com permissão para acesso a vendas!', type: 'success' });
+        fetchPosUsers();
+        setIsPosUserModalOpen(false);
+        setSelectedLinkedUserId('');
+        setPosUserNickname('');
+        setPosUserPassword(0);
+      } else {
+        setToast({ message: result.mensagem || 'Erro ao cadastrar usuário PDV', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Erro ao salvar usuário PDV:', error);
+      setToast({ message: 'Erro de conexão com o servidor', type: 'error' });
+    }
+  };
+
+  const handleTogglePosUserAccess = async (posUser: UsuarioPdv) => {
+    if (!user?.token) return;
+
+    const newAcesso = !posUser.acessoCaixa;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/usuariopdv/alterar-acesso-usuario-pdv`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          acessoCaixa: newAcesso,
+          usuarioCaixaPdvEntityId: posUser.usuarioCaixaPdvEntityId
+        })
+      });
+      const result = await response.json();
+      if (result.status) {
+        setToast({ 
+          message: newAcesso ? 'Acesso liberado com sucesso!' : 'Acesso bloqueado com sucesso!', 
+          type: newAcesso ? 'success' : 'error' 
+        });
+        fetchPosUsers();
+      } else {
+        setToast({ message: result.mensagem || 'Erro ao alterar acesso', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Erro ao alterar acesso do usuário PDV:', error);
+      setToast({ message: 'Erro de conexão com o servidor', type: 'error' });
     }
   };
 
@@ -621,25 +758,34 @@ export default function App() {
     <div className="min-h-screen bg-[#F8F9FA] text-slate-900 font-sans selection:bg-indigo-100">
       {/* Header / Navigation */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-y-4">
-          <div className="flex items-center gap-4 sm:gap-8">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
-                <Store className="w-6 h-6" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-8">
+            <div className="flex items-center gap-2 sm:gap-4">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-indigo-600 rounded-lg sm:rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
+                <Store className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
-              <h1 className="text-xl font-bold tracking-tight hidden sm:block">EasyCashier</h1>
+              <h1 className="text-lg sm:text-xl font-black tracking-tight hidden md:block">EasyCashier</h1>
             </div>
             
             {user && (
-              <nav className="flex items-center gap-1">
+              <nav className="flex items-center gap-0.5 sm:gap-1">
                 <button 
                   onClick={() => {
                     setCurrentView('products');
                     setProductSubView('menu');
                   }}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${currentView === 'products' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'}`}
+                  className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${currentView === 'products' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'}`}
                 >
                   Produtos
+                </button>
+                <button 
+                  onClick={() => {
+                    setCurrentView('people');
+                    setPeopleSubView('menu');
+                  }}
+                  className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${currentView === 'people' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  Pessoas
                 </button>
               </nav>
             )}
@@ -648,18 +794,17 @@ export default function App() {
           {user && (
             <div className="flex items-center gap-2 sm:gap-4">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
-                  <User className="w-4 h-4 text-indigo-600" />
+                <div className="w-7 h-7 sm:w-8 sm:h-8 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-600" />
                 </div>
-                <div className="flex flex-col items-start sm:items-end">
-                  <span className="text-sm font-bold text-slate-700 hidden sm:block">{user.name}</span>
+                <div className="flex flex-col items-start sm:items-end overflow-hidden max-w-[80px] sm:max-w-none">
+                  <span className="text-xs sm:text-sm font-bold text-slate-700 truncate w-full hidden sm:block">{user.name}</span>
                   <button 
                     onClick={() => setCurrentView('branches')}
-                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 group"
+                    className="text-[9px] sm:text-[10px] font-black text-indigo-600 hover:text-indigo-700 flex items-center gap-1 group truncate w-full"
                   >
-                    <Store className="w-3 h-3 group-hover:scale-110 transition-transform" />
-                    <span className="hidden sm:inline">{selectedBranch ? selectedBranch.nomeFilial : 'Selecionar Filial'}</span>
-                    <span className="sm:hidden">Filial</span>
+                    <Store className="w-2.5 h-2.5 group-hover:scale-110 transition-transform flex-shrink-0" />
+                    <span className="truncate">{selectedBranch ? selectedBranch.nomeFilial : 'Filial'}</span>
                   </button>
                 </div>
               </div>
@@ -669,10 +814,10 @@ export default function App() {
                   setCurrentView('auth');
                   setSelectedBranch(null);
                 }}
-                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-all"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-all"
                 title="Sair"
               >
-                <LogOut className="w-5 h-5" />
+                <LogOut className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
           )}
@@ -880,6 +1025,242 @@ export default function App() {
                 </div>
               )}
             </motion.div>
+          ) : currentView === 'people' ? (
+            <motion.div 
+              key="people-view"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              {peopleSubView !== 'menu' && (
+                <button 
+                  onClick={() => setPeopleSubView('menu')}
+                  className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors font-medium text-sm mb-2 sm:mb-4"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Voltar ao Menu de Pessoas
+                </button>
+              )}
+
+              {peopleSubView === 'menu' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {[
+                    { id: 'posUsers', title: 'Usuários PDV', desc: 'Gerencie os operadores do caixa', icon: <Users className="w-8 h-8" />, color: 'bg-indigo-50 text-indigo-600' },
+                    { id: 'customers', title: 'Clientes', desc: 'Cadastro de clientes e histórico', icon: <User className="w-8 h-8" />, color: 'bg-emerald-50 text-emerald-600' },
+                    { id: 'suppliers', title: 'Fornecedores', desc: 'Gerencie seus fornecedores', icon: <Store className="w-8 h-8" />, color: 'bg-amber-50 text-amber-600' },
+                  ].map((item) => (
+                    <motion.button
+                      key={item.id}
+                      whileHover={{ scale: 1.02, y: -4 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setPeopleSubView(item.id as PeopleSubView)}
+                      className="bg-white p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl hover:border-indigo-100 transition-all text-left flex flex-col gap-4 sm:gap-6 group"
+                    >
+                      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 ${item.color}`}>
+                        {item.icon}
+                      </div>
+                      <div>
+                        <h3 className="text-lg sm:text-xl font-black text-slate-800 tracking-tight">{item.title}</h3>
+                        <p className="text-xs sm:text-sm text-slate-500 mt-0.5 sm:mt-1">{item.desc}</p>
+                      </div>
+                    </motion.button>
+                  ))}
+                </div>
+              ) : peopleSubView === 'posUsers' ? (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
+                    <div>
+                      <h2 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">Usuários PDV</h2>
+                      <p className="text-xs sm:text-sm text-slate-500 mt-0.5 sm:mt-1">Gerencie os usuários que têm acesso ao ponto de venda.</p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        fetchLinkedUsers();
+                        setIsPosUserModalOpen(true);
+                      }}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 sm:px-6 sm:py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg sm:rounded-xl font-bold transition-all shadow-lg shadow-indigo-100 active:scale-95"
+                    >
+                      <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+                      Novo Usuário PDV
+                    </button>
+                  </div>
+
+                  <div className="bg-white p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 sm:gap-4">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
+                      <input 
+                        type="text"
+                        placeholder="Buscar usuário por nome ou e-mail..."
+                        value={posUserSearch}
+                        onChange={(e) => setPosUserSearch(e.target.value)}
+                        className="w-full pl-12 pr-4 py-2.5 sm:py-3 bg-slate-50 border-none rounded-lg sm:rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    {/* Desktop Table */}
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/50 text-slate-400 text-[10px] sm:text-[11px] uppercase tracking-widest font-bold border-b border-slate-100">
+                            <th className="px-4 py-3 sm:px-6 sm:py-4">Nome</th>
+                            <th className="px-4 py-3 sm:px-6 sm:py-4">Apelido</th>
+                            <th className="px-4 py-3 sm:px-6 sm:py-4">E-mail</th>
+                            <th className="px-4 py-3 sm:px-6 sm:py-4">Acesso</th>
+                            <th className="px-4 py-3 sm:px-6 sm:py-4 text-center">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {filteredPosUsers.map((posUser) => (
+                            <tr key={posUser.usuarioCaixaPdvEntityId} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-4 py-3 sm:px-6 sm:py-4">
+                                <span className="text-sm font-bold text-slate-700">{posUser.usuarioCaixaPdvEntityNome}</span>
+                              </td>
+                              <td className="px-4 py-3 sm:px-6 sm:py-4">
+                                <span className="text-sm text-slate-500">{posUser.apelidoOperadorCaixa}</span>
+                              </td>
+                              <td className="px-4 py-3 sm:px-6 sm:py-4">
+                                <span className="text-sm text-slate-500">{posUser.email}</span>
+                              </td>
+                              <td className="px-4 py-3 sm:px-6 sm:py-4">
+                                {posUser.acessoCaixa ? (
+                                  <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase">Liberado</span>
+                                ) : (
+                                  <span className="px-2 py-1 bg-rose-50 text-rose-600 rounded-md text-[10px] font-bold uppercase">Bloqueado</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 sm:px-6 sm:py-4">
+                                <div className="flex items-center justify-center gap-4">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-[10px] font-bold uppercase ${posUser.acessoCaixa ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                      {posUser.acessoCaixa ? 'Ativo' : 'Inativo'}
+                                    </span>
+                                    <button
+                                      onClick={() => handleTogglePosUserAccess(posUser)}
+                                      className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
+                                        posUser.acessoCaixa ? 'bg-emerald-500' : 'bg-slate-300'
+                                      }`}
+                                    >
+                                      <motion.div
+                                        animate={{ x: posUser.acessoCaixa ? 20 : 2 }}
+                                        className="absolute top-1 w-3 h-3 bg-white rounded-full shadow-sm"
+                                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                      />
+                                    </button>
+                                  </div>
+                                  <div className="h-4 w-px bg-slate-100" />
+                                  <div className="flex items-center gap-1">
+                                    <button className="p-1.5 sm:p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md sm:rounded-lg transition-all">
+                                      <Edit3 className="w-4 h-4" />
+                                    </button>
+                                    <button className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md sm:rounded-lg transition-all">
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile Card List */}
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {filteredPosUsers.map((posUser) => (
+                        <div key={posUser.usuarioCaixaPdvEntityId} className="p-4 space-y-3">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h4 className="text-sm font-black text-slate-800">{posUser.usuarioCaixaPdvEntityNome}</h4>
+                              <p className="text-xs text-slate-500">{posUser.email}</p>
+                            </div>
+                            {posUser.acessoCaixa ? (
+                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-md text-[9px] font-black uppercase tracking-wider">Liberado</span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-rose-50 text-rose-600 rounded-md text-[9px] font-black uppercase tracking-wider">Bloqueado</span>
+                            )}
+                          </div>
+                          
+                          <div className="flex items-center justify-between pt-2">
+                            <div className="flex flex-col">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Apelido</span>
+                              <span className="text-xs font-bold text-slate-600">{posUser.apelidoOperadorCaixa}</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => handleTogglePosUserAccess(posUser)}
+                                className={`relative w-9 h-4.5 rounded-full transition-colors duration-200 focus:outline-none ${
+                                  posUser.acessoCaixa ? 'bg-emerald-500' : 'bg-slate-300'
+                                }`}
+                              >
+                                <motion.div
+                                  animate={{ x: posUser.acessoCaixa ? 18 : 2 }}
+                                  className="absolute top-0.75 w-3 h-3 bg-white rounded-full shadow-sm"
+                                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                />
+                              </button>
+                              <div className="flex items-center gap-1">
+                                <button className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all">
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {filteredPosUsers.length === 0 && (
+                      <div className="px-6 py-10 text-center text-slate-400">
+                        Nenhum usuário PDV encontrado.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : peopleSubView === 'customers' ? (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Clientes</h2>
+                      <p className="text-sm text-slate-500 mt-1">Gerencie o cadastro de seus clientes.</p>
+                    </div>
+                    <button className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-100 active:scale-95">
+                      <Plus className="w-5 h-5" />
+                      Novo Cliente
+                    </button>
+                  </div>
+                  <div className="py-20 text-center text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
+                    <Users className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                    <p className="text-lg font-medium">Módulo de Clientes</p>
+                    <p className="text-sm">Esta funcionalidade estará disponível em breve.</p>
+                  </div>
+                </div>
+              ) : peopleSubView === 'suppliers' ? (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Fornecedores</h2>
+                      <p className="text-sm text-slate-500 mt-1">Gerencie o cadastro de seus fornecedores.</p>
+                    </div>
+                    <button className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-100 active:scale-95">
+                      <Plus className="w-5 h-5" />
+                      Novo Fornecedor
+                    </button>
+                  </div>
+                  <div className="py-20 text-center text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
+                    <Truck className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                    <p className="text-lg font-medium">Módulo de Fornecedores</p>
+                    <p className="text-sm">Esta funcionalidade estará disponível em breve.</p>
+                  </div>
+                </div>
+              ) : null}
+            </motion.div>
           ) : (
             <motion.div 
               key="products-view"
@@ -904,7 +1285,6 @@ export default function App() {
                     { id: 'list', title: 'Produtos', desc: 'Gerencie seu catálogo completo', icon: <Package className="w-8 h-8" />, color: 'bg-blue-50 text-blue-600' },
                     { id: 'categories', title: 'Categorias de Produtos', desc: 'Organize produtos por grupos', icon: <Layers className="w-8 h-8" />, color: 'bg-indigo-50 text-indigo-600' },
                     { id: 'units', title: 'Unidades Produto', desc: 'Gerencie unidades de medida', icon: <Ruler className="w-8 h-8" />, color: 'bg-emerald-50 text-emerald-600' },
-                    { id: 'prices', title: 'Preços', desc: 'Tabelas de preços e promoções', icon: <Tag className="w-8 h-8" />, color: 'bg-amber-50 text-amber-600' },
                     { id: 'priceCategories', title: 'Categorias de Preço', desc: 'Gerencie categorias de preço', icon: <Tag className="w-8 h-8" />, color: 'bg-orange-50 text-orange-600' },
                     { id: 'assignPrices', title: 'Atribuir Preços', desc: 'Atribua preços aos produtos', icon: <Tag className="w-8 h-8" />, color: 'bg-purple-50 text-purple-600' },
                     { id: 'stock', title: 'Estoque', desc: 'Controle de entradas e saídas', icon: <Box className="w-8 h-8" />, color: 'bg-rose-50 text-rose-600' },
@@ -960,41 +1340,69 @@ export default function App() {
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-bold border-b border-slate-100">
-                          <th className="px-6 py-4">Categoria de Preço</th>
-                          <th className="px-4 py-3 sm:px-6 sm:py-4">Habilitado</th>
-                          <th className="px-6 py-4 text-center">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {filteredPriceCategories.map((priceCategory) => (
-                          <tr key={priceCategory.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="px-6 py-4">
-                              <span className="text-sm font-bold text-slate-700">{priceCategory.categoriaPreco}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              {priceCategory.habilitado ? (
-                                <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase">Sim</span>
-                              ) : (
-                                <span className="px-2 py-1 bg-rose-50 text-rose-600 rounded-md text-[10px] font-bold uppercase">Não</span>
-                              )}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center justify-center gap-2">
-                                <button 
-                                  onClick={() => openEditPriceCategory(priceCategory)}
-                                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                                >
-                                  <Edit3 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
+                    {/* Desktop Table */}
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-bold border-b border-slate-100">
+                            <th className="px-6 py-4">Categoria de Preço</th>
+                            <th className="px-4 py-3 sm:px-6 sm:py-4">Habilitado</th>
+                            <th className="px-6 py-4 text-center">Ações</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {filteredPriceCategories.map((priceCategory) => (
+                            <tr key={priceCategory.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-6 py-4">
+                                <span className="text-sm font-bold text-slate-700">{priceCategory.categoriaPreco}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                {priceCategory.habilitado ? (
+                                  <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase">Sim</span>
+                                ) : (
+                                  <span className="px-2 py-1 bg-rose-50 text-rose-600 rounded-md text-[10px] font-bold uppercase">Não</span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button 
+                                    onClick={() => openEditPriceCategory(priceCategory)}
+                                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                  >
+                                    <Edit3 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile Card List */}
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {filteredPriceCategories.map((priceCategory) => (
+                        <div key={priceCategory.id} className="p-4 flex items-center justify-between">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-sm font-black text-slate-800">{priceCategory.categoriaPreco}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Status:</span>
+                              {priceCategory.habilitado ? (
+                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-md text-[9px] font-black uppercase tracking-wider">Habilitado</span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-rose-50 text-rose-600 rounded-md text-[9px] font-black uppercase tracking-wider">Desabilitado</span>
+                              )}
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => openEditPriceCategory(priceCategory)}
+                            className="p-2.5 bg-slate-50 text-slate-600 rounded-xl"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : productSubView === 'list' ? (
@@ -1030,50 +1438,94 @@ export default function App() {
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-bold border-b border-slate-100">
-                          <th className="px-6 py-4">Produto / Código</th>
-                          <th className="px-6 py-4">Categoria</th>
-                          <th className="px-6 py-4">Unidade</th>
-                          <th className="px-6 py-4 text-center">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {filteredProductsList.map((product) => (
-                          <tr key={product.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="px-6 py-4">
-                              <div className="flex flex-col">
-                                <span className="text-sm font-bold text-slate-700">{product.nomeProduto}</span>
-                                <span className="text-[10px] font-mono text-slate-400">{product.codigoProduto}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded-md text-[10px] font-bold uppercase">{product.categoriaProduto}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase">{product.unidadeMedidaProduto}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center justify-center gap-2">
-                                <button 
-                                  onClick={() => openEditProduct(product)}
-                                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                                >
-                                  <Edit3 className="w-4 h-4" />
-                                </button>
-                                <button 
-                                  onClick={() => openAssignPriceModal(product)}
-                                  className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-all"
-                                >
-                                  <Tag className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
+                    {/* Desktop Table */}
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-bold border-b border-slate-100">
+                            <th className="px-6 py-4">Produto / Código</th>
+                            <th className="px-6 py-4">Categoria</th>
+                            <th className="px-6 py-4">Unidade</th>
+                            <th className="px-6 py-4 text-center">Ações</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {filteredProductsList.map((product) => (
+                            <tr key={product.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-bold text-slate-700">{product.nomeProduto}</span>
+                                  <span className="text-[10px] font-mono text-slate-400">{product.codigoProduto}</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded-md text-[10px] font-bold uppercase">{product.categoriaProduto}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[10px] font-bold uppercase">{product.unidadeMedidaProduto}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button 
+                                    onClick={() => openEditProduct(product)}
+                                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                  >
+                                    <Edit3 className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => openAssignPriceModal(product)}
+                                    className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-all"
+                                  >
+                                    <Tag className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile Card List */}
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {filteredProductsList.map((product) => (
+                        <div key={product.id} className="p-4 space-y-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-black text-slate-800">{product.nomeProduto}</span>
+                              <span className="text-[10px] font-mono text-slate-400">{product.codigoProduto}</span>
+                            </div>
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-md text-[9px] font-black uppercase tracking-wider">{product.categoriaProduto}</span>
+                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-md text-[9px] font-black uppercase tracking-wider">{product.unidadeMedidaProduto}</span>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <button 
+                              onClick={() => openEditProduct(product)}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              Editar
+                            </button>
+                            <button 
+                              onClick={() => openAssignPriceModal(product)}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-xs font-bold"
+                            >
+                              <Tag className="w-3.5 h-3.5" />
+                              Preços
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {filteredProductsList.length === 0 && (
+                      <div className="px-6 py-10 text-center text-slate-400">
+                        Nenhum produto encontrado.
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : productSubView === 'categories' ? (
@@ -1226,46 +1678,81 @@ export default function App() {
 
                   {/* Product Prices Table */}
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-bold border-b border-slate-100">
-                          <th className="px-6 py-4">Produto</th>
-                          <th className="px-6 py-4">Filial</th>
-                          <th className="px-6 py-4">Categoria de Preço</th>
-                          <th className="px-6 py-4">Preço</th>
-                          <th className="px-6 py-4 text-center">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {filteredProductPrices.map((productPrice) => (
-                          <tr key={productPrice.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="px-6 py-4">
-                              <span className="text-sm font-bold text-slate-700">{productPrice.nomeProduto}</span>
-                              <span className="block text-[10px] font-mono text-slate-400">{productPrice.codigoProduto}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-md text-[10px] font-bold uppercase">{productPrice.nomeFilial}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="px-2 py-1 bg-orange-50 text-orange-600 rounded-md text-[10px] font-bold uppercase">{productPrice.categoriaPreco}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="text-sm font-bold text-slate-700">{productPrice.precoProduto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center justify-center gap-2">
-                                <button 
-                                  onClick={() => openEditProductPrice(productPrice)}
-                                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                                >
-                                  <Edit3 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
+                    {/* Desktop Table */}
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-bold border-b border-slate-100">
+                            <th className="px-6 py-4">Produto</th>
+                            <th className="px-6 py-4">Filial</th>
+                            <th className="px-6 py-4">Categoria de Preço</th>
+                            <th className="px-6 py-4">Preço</th>
+                            <th className="px-6 py-4 text-center">Ações</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {filteredProductPrices.map((productPrice) => (
+                            <tr key={productPrice.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-6 py-4">
+                                <span className="text-sm font-bold text-slate-700">{productPrice.nomeProduto}</span>
+                                <span className="block text-[10px] font-mono text-slate-400">{productPrice.codigoProduto}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-md text-[10px] font-bold uppercase">{productPrice.nomeFilial}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="px-2 py-1 bg-orange-50 text-orange-600 rounded-md text-[10px] font-bold uppercase">{productPrice.categoriaPreco}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="text-sm font-bold text-slate-700">{productPrice.precoProduto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button 
+                                    onClick={() => openEditProductPrice(productPrice)}
+                                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                  >
+                                    <Edit3 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile Card List */}
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {filteredProductPrices.map((productPrice) => (
+                        <div key={productPrice.id} className="p-4 space-y-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-black text-slate-800">{productPrice.nomeProduto}</span>
+                              <span className="text-[10px] font-mono text-slate-400">{productPrice.codigoProduto}</span>
+                            </div>
+                            <span className="text-sm font-black text-indigo-600">
+                              {productPrice.precoProduto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
+                          </div>
+                          
+                          <div className="flex flex-wrap gap-2">
+                            <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md text-[9px] font-black uppercase tracking-wider">{productPrice.nomeFilial}</span>
+                            <span className="px-2 py-0.5 bg-orange-50 text-orange-600 rounded-md text-[9px] font-black uppercase tracking-wider">{productPrice.categoriaPreco}</span>
+                          </div>
+
+                          <div className="flex justify-end pt-1">
+                            <button 
+                              onClick={() => openEditProductPrice(productPrice)}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              Editar Preço
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   {filteredProductPrices.length === 0 && (
@@ -1342,6 +1829,24 @@ export default function App() {
                     </div>
                   )}
                 </div>
+              ) : productSubView === 'stock' ? (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Controle de Estoque</h2>
+                      <p className="text-sm text-slate-500 mt-1">Gerencie as entradas e saídas de produtos.</p>
+                    </div>
+                    <button className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-100 active:scale-95">
+                      <Plus className="w-5 h-5" />
+                      Nova Movimentação
+                    </button>
+                  </div>
+                  <div className="py-20 text-center text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
+                    <Package className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                    <p className="text-lg font-medium">Módulo de Estoque</p>
+                    <p className="text-sm">Esta funcionalidade estará disponível em breve.</p>
+                  </div>
+                </div>
               ) : (
                 <div className="py-20 text-center text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
                   <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1372,9 +1877,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
             >
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
                 <h3 className="text-lg font-bold text-slate-800">
                   {editingProductPrice ? 'Alterar Preço do Produto' : 'Novo Preço de Produto'}
                 </h3>
@@ -1386,7 +1891,7 @@ export default function App() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveProductPrice} className="p-6 space-y-4">
+              <form onSubmit={handleSaveProductPrice} className="p-6 space-y-4 overflow-y-auto">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1 col-span-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Produto</label>
@@ -1490,9 +1995,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
             >
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
                 <h3 className="text-lg font-bold text-slate-800">
                   {editingProduct ? 'Alterar Produto' : 'Novo Produto'}
                 </h3>
@@ -1504,7 +2009,7 @@ export default function App() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveProduct} className="p-6 space-y-4">
+              <form onSubmit={handleSaveProduct} className="p-6 space-y-4 overflow-y-auto">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1 col-span-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome do Produto</label>
@@ -1596,9 +2101,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
             >
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
                 <h3 className="text-lg font-bold text-slate-800">
                   {editingPriceCategory ? 'Alterar Categoria de Preço' : 'Nova Categoria de Preço'}
                 </h3>
@@ -1610,7 +2115,7 @@ export default function App() {
                 </button>
               </div>
 
-              <form onSubmit={handleSavePriceCategory} className="p-6 space-y-6">
+              <form onSubmit={handleSavePriceCategory} className="p-6 space-y-6 overflow-y-auto">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Nome da Categoria de Preço</label>
                   <input 
@@ -1675,9 +2180,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
             >
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
                 <h3 className="text-lg font-bold text-slate-800">
                   {editingCategory ? 'Alterar Categoria' : 'Nova Categoria'}
                 </h3>
@@ -1689,7 +2194,7 @@ export default function App() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveCategory} className="p-6 space-y-6">
+              <form onSubmit={handleSaveCategory} className="p-6 space-y-6 overflow-y-auto">
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Nome da Categoria</label>
                   <input 
@@ -1735,6 +2240,113 @@ export default function App() {
               </form>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* POS User Modal */}
+      <AnimatePresence>
+        {isPosUserModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsPosUserModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+                <h3 className="text-lg font-bold text-slate-800">Novo Usuário PDV</h3>
+                <button 
+                  onClick={() => setIsPosUserModalOpen(false)}
+                  className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSavePosUser} className="p-6 space-y-6 overflow-y-auto">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Selecionar Usuário Vinculado</label>
+                  <select 
+                    required
+                    value={selectedLinkedUserId}
+                    onChange={(e) => setSelectedLinkedUserId(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                  >
+                    <option value="">Selecione um usuário...</option>
+                    {linkedUsers.map((u) => (
+                      <option key={u.idUsuarioVinculado} value={u.idUsuarioVinculado}>
+                        {u.nomeUsuarioVinculado} ({u.emailUsuarioVinculado})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Apelido do Operador</label>
+                  <input 
+                    required
+                    value={posUserNickname}
+                    onChange={(e) => setPosUserNickname(e.target.value)}
+                    placeholder="Ex: Caixa 01, Operador João..."
+                    className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Senha Numérica</label>
+                  <input 
+                    type="number"
+                    required
+                    value={posUserPassword || ''}
+                    onChange={(e) => setPosUserPassword(parseInt(e.target.value) || 0)}
+                    placeholder="Ex: 1234"
+                    className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button 
+                    type="button"
+                    onClick={() => setIsPosUserModalOpen(false)}
+                    className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-100"
+                  >
+                    Cadastrar Usuário PDV
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: 50, x: '-50%' }}
+            className={`fixed bottom-8 left-1/2 z-[100] px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border ${
+              toast.type === 'success' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-[#DC143C] border-[#B21031] text-white'
+            }`}
+          >
+            {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+            <span className="text-sm font-bold">{toast.message}</span>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

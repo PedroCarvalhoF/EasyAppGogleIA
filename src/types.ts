@@ -51,3 +51,21 @@ export interface ProductPrice {
   tipoPrecoProduto: string;
   habilitado: boolean;
 }
+
+export interface UsuarioPdv {
+  acessoCaixa: boolean;
+  usuarioCaixaPdvEntityId: string;
+  usuarioCaixaPdvEntityNome: string;
+  apelidoOperadorCaixa: string;
+  senhaOperadorCaixa: number;
+  email: string;
+}
+
+export interface LinkedUser {
+  clienteId: string;
+  clienteNome: string;
+  idUsuarioVinculado: string;
+  nomeUsuarioVinculado: string;
+  emailUsuarioVinculado: string;
+  acessoPermitido: boolean;
+}
