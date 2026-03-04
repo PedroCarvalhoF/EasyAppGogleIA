@@ -30,15 +30,23 @@ import {
   Box,
   Users,
   ChevronLeft,
-  Truck
+  ChevronRight,
+  RefreshCw,
+  Truck,
+  ArrowLeft,
+  Wallet,
+  Receipt,
+  BarChart3,
+  Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Category, UnitOfMeasure, Branch, PriceCategory, ProductPrice, UsuarioPdv, LinkedUser } from './types';
+import { Product, Category, UnitOfMeasure, Branch, PriceCategory, ProductPrice, UsuarioPdv, LinkedUser, PdvAberto } from './types';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // Mock Data
 const INITIAL_CATEGORIES: Category[] = [];
 
-type View = 'products' | 'auth' | 'branches' | 'people';
+type View = 'products' | 'auth' | 'branches' | 'people' | 'pdv';
 type ProductSubView = 'menu' | 'list' | 'categories' | 'units' | 'prices' | 'stock' | 'priceCategories' | 'assignPrices';
 type PeopleSubView = 'menu' | 'posUsers' | 'customers' | 'suppliers';
 
@@ -198,6 +206,12 @@ export default function App() {
   const [posUserPassword, setPosUserPassword] = useState<number>(0);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // PDV State
+  const [pdvsAbertos, setPdvsAbertos] = useState<PdvAberto[]>([]);
+  const [pdvLoading, setPdvLoading] = useState(false);
+  const [isNewPdvModalOpen, setIsNewPdvModalOpen] = useState(false);
+  const [pdvFormLoading, setPdvFormLoading] = useState(false);
+
   // Product Prices State
   const [productPrices, setProductPrices] = useState<ProductPrice[]>([]);
   const [productPriceSearch, setProductPriceSearch] = useState('');
@@ -230,6 +244,96 @@ export default function App() {
       fetchPriceCategories();
     }
   }, [currentView, productSubView, user, fetchPriceCategories]);
+
+  // POS Users API Handlers
+  const fetchPosUsers = useCallback(async () => {
+    if (!user?.token) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/usuariopdv`, {
+        headers: {
+          'Authorization': `Bearer ${user.token}`
+        }
+      });
+      const result = await response.json();
+      if (result.status && Array.isArray(result.data)) {
+        setPosUsers(result.data);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar usuários PDV:', error);
+    }
+  }, [user?.token]);
+
+  // PDV API Handlers
+  const fetchPdvsAbertos = useCallback(async () => {
+    if (!user?.token) return;
+    setPdvLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pontovenda/pdvs-abertos`, {
+        headers: {
+          'Authorization': `Bearer ${user.token}`
+        }
+      });
+      const result = await response.json();
+      if (result.status && Array.isArray(result.data)) {
+        setPdvsAbertos(result.data);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar PDVs abertos:', error);
+    } finally {
+      setPdvLoading(false);
+    }
+  }, [user?.token]);
+
+  useEffect(() => {
+    if (currentView === 'pdv' && user) {
+      fetchPdvsAbertos();
+      fetchPosUsers();
+    }
+  }, [currentView, user, fetchPdvsAbertos, fetchPosUsers]);
+
+  const handleCreatePdv = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user?.token || !selectedBranch) return;
+
+    const formData = new FormData(e.currentTarget);
+    const usuarioPdvId = formData.get('usuarioPdvId') as string;
+    const descricaoPeriodo = formData.get('descricaoPeriodo') as string;
+
+    if (!usuarioPdvId || !descricaoPeriodo) {
+      setToast({ message: 'Por favor, preencha todos os campos.', type: 'error' });
+      return;
+    }
+
+    setPdvFormLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pontovenda/novo-pdv`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          filialId: selectedBranch.id,
+          usuarioPdvId,
+          descricaoPeriodo
+        })
+      });
+
+      const result = await response.json();
+      if (result.status) {
+        setToast({ message: 'Caixa aberto com sucesso!', type: 'success' });
+        setIsNewPdvModalOpen(false);
+        fetchPdvsAbertos();
+      } else {
+        setToast({ message: result.mensagem || 'Erro ao abrir caixa', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Erro ao abrir caixa:', error);
+      setToast({ message: 'Erro de conexão com o servidor', type: 'error' });
+    } finally {
+      setPdvFormLoading(false);
+    }
+  };
 
   const filteredPriceCategories = useMemo(() => {
     return priceCategories.filter(pc => 
@@ -297,24 +401,6 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [toast]);
-
-  // POS Users API Handlers
-  const fetchPosUsers = useCallback(async () => {
-    if (!user?.token) return;
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/usuariopdv`, {
-        headers: {
-          'Authorization': `Bearer ${user.token}`
-        }
-      });
-      const result = await response.json();
-      if (result.status && Array.isArray(result.data)) {
-        setPosUsers(result.data);
-      }
-    } catch (error) {
-      console.error('Erro ao buscar usuários PDV:', error);
-    }
-  }, [user?.token]);
 
   useEffect(() => {
     if (currentView === 'people' && peopleSubView === 'posUsers' && user) {
@@ -757,8 +843,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-slate-900 font-sans selection:bg-indigo-100">
       {/* Header / Navigation */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-3 flex items-center justify-between gap-2">
+      {user && currentView !== 'pdv' && (
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-8">
             <div className="flex items-center gap-2 sm:gap-4">
               <div className="w-8 h-8 sm:w-10 sm:h-10 bg-indigo-600 rounded-lg sm:rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
@@ -786,6 +873,14 @@ export default function App() {
                   className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${currentView === 'people' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'}`}
                 >
                   Pessoas
+                </button>
+                <button 
+                  onClick={() => {
+                    setCurrentView('pdv');
+                  }}
+                  className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-all ${currentView === 'pdv' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  PDV
                 </button>
               </nav>
             )}
@@ -823,6 +918,7 @@ export default function App() {
           )}
         </div>
       </header>
+      )}
 
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <AnimatePresence mode="wait">
@@ -1035,18 +1131,23 @@ export default function App() {
             >
               {peopleSubView !== 'menu' && (
                 <button 
-                  onClick={() => setPeopleSubView('menu')}
+                  onClick={() => {
+                    if (peopleSubView === 'posUsers') {
+                      setCurrentView('pdv');
+                    } else {
+                      setPeopleSubView('menu');
+                    }
+                  }}
                   className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors font-medium text-sm mb-2 sm:mb-4"
                 >
                   <ChevronLeft className="w-4 h-4" />
-                  Voltar ao Menu de Pessoas
+                  Voltar
                 </button>
               )}
 
               {peopleSubView === 'menu' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                   {[
-                    { id: 'posUsers', title: 'Usuários PDV', desc: 'Gerencie os operadores do caixa', icon: <Users className="w-8 h-8" />, color: 'bg-indigo-50 text-indigo-600' },
                     { id: 'customers', title: 'Clientes', desc: 'Cadastro de clientes e histórico', icon: <User className="w-8 h-8" />, color: 'bg-emerald-50 text-emerald-600' },
                     { id: 'suppliers', title: 'Fornecedores', desc: 'Gerencie seus fornecedores', icon: <Store className="w-8 h-8" />, color: 'bg-amber-50 text-amber-600' },
                   ].map((item) => (
@@ -1260,6 +1361,174 @@ export default function App() {
                   </div>
                 </div>
               ) : null}
+            </motion.div>
+          ) : currentView === 'pdv' ? (
+            <motion.div 
+              key="pdv-view"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="min-h-screen bg-slate-50"
+            >
+              {/* PDV Header */}
+              <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-4 flex items-center justify-between sticky top-0 z-20">
+                <button 
+                  onClick={() => setCurrentView('products')}
+                  className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors font-bold text-sm"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Sair PDV
+                </button>
+                <div className="flex items-center gap-3">
+                  <div className="hidden sm:flex flex-col items-end">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Operador</span>
+                    <span className="text-sm font-black text-slate-700">{user?.name}</span>
+                  </div>
+                  <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
+                    <User className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="max-w-[1600px] mx-auto p-4 sm:p-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Left 2/3: Open PDVs */}
+                  <div className="lg:col-span-2 space-y-8">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
+                          <Store className="w-8 h-8 text-indigo-600" />
+                          Caixas Abertos
+                        </h2>
+                        <p className="text-slate-500 font-medium mt-1">Sessões de venda ativas no momento</p>
+                      </div>
+                      <button 
+                        onClick={fetchPdvsAbertos}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                        title="Atualizar"
+                      >
+                        <RefreshCw className={`w-5 h-5 ${pdvLoading ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+
+                    {pdvLoading ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {[1, 2, 3, 4].map((i) => (
+                          <div key={i} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-pulse">
+                            <div className="flex items-center gap-4 mb-4">
+                              <div className="w-12 h-12 bg-slate-100 rounded-2xl" />
+                              <div className="flex-1 space-y-2">
+                                <div className="h-4 bg-slate-100 rounded w-3/4" />
+                                <div className="h-3 bg-slate-100 rounded w-1/2" />
+                              </div>
+                            </div>
+                            <div className="h-10 bg-slate-50 rounded-xl" />
+                          </div>
+                        ))}
+                      </div>
+                    ) : pdvsAbertos.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {pdvsAbertos.map((pdv) => (
+                          <motion.div 
+                            key={pdv.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group"
+                          >
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                  <User className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <h4 className="font-black text-slate-800">{pdv.usuario}</h4>
+                                  <p className="text-xs text-slate-400 font-medium">{pdv.filialPdv}</p>
+                                </div>
+                              </div>
+                              <div className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-wider">
+                                Aberto
+                              </div>
+                            </div>
+                            
+                            <div className="space-y-3 mb-6">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-slate-400 font-medium">Abertura</span>
+                                <span className="text-slate-700 font-bold">{new Date(pdv.createAt).toLocaleString()}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-slate-400 font-medium">Período</span>
+                                <span className="text-slate-700 font-bold">{pdv.descricaoPeriodo}</span>
+                              </div>
+                              {pdv.descricao && (
+                                <div className="p-3 bg-slate-50 rounded-xl text-[11px] text-slate-500 font-medium italic">
+                                  "{pdv.descricao}"
+                                </div>
+                              )}
+                            </div>
+
+                            <button className="w-full py-3 bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-600 rounded-xl font-bold transition-all flex items-center justify-center gap-2">
+                              Assumir Caixa
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </motion.div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="py-20 text-center text-slate-400 bg-white rounded-[2.5rem] border border-dashed border-slate-200">
+                        <Store className="w-16 h-16 mx-auto mb-4 opacity-10" />
+                        <p className="text-lg font-black text-slate-800">Nenhum caixa aberto</p>
+                        <p className="text-sm font-medium">Inicie uma nova sessão no painel ao lado.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right 1/3: PDV Actions */}
+                  <div className="space-y-6">
+                    <div className="bg-indigo-600 p-8 rounded-[2rem] text-white shadow-2xl shadow-indigo-200 relative overflow-hidden group">
+                      <div className="relative z-10">
+                        <h3 className="text-2xl font-black mb-2">Novo Caixa</h3>
+                        <p className="text-indigo-100 text-sm font-medium mb-6">Inicie uma nova sessão de vendas agora.</p>
+                        <button 
+                          onClick={() => setIsNewPdvModalOpen(true)}
+                          className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black shadow-lg hover:bg-indigo-50 transition-all active:scale-95 flex items-center justify-center gap-2"
+                        >
+                          <Plus className="w-5 h-5" />
+                          Abrir Caixa
+                        </button>
+                      </div>
+                      <Box className="absolute -right-8 -bottom-8 w-48 h-48 text-white/10 rotate-12 group-hover:rotate-0 transition-transform duration-500" />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4">
+                      <button className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 group">
+                        <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                          <Search className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-slate-800">Consultas Detalhadas</h4>
+                          <p className="text-xs text-slate-400 font-medium">Histórico e relatórios de vendas</p>
+                        </div>
+                      </button>
+
+                      <button 
+                        onClick={() => {
+                          setCurrentView('people');
+                          setPeopleSubView('posUsers');
+                        }}
+                        className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 group"
+                      >
+                        <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                          <ShieldCheck className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-slate-800">Usuários PDV</h4>
+                          <p className="text-xs text-slate-400 font-medium">Gerenciar permissões e acessos</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           ) : (
             <motion.div 
@@ -1860,6 +2129,96 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* New PDV Modal */}
+      <AnimatePresence>
+        {isNewPdvModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsNewPdvModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+                <h3 className="text-lg font-bold text-slate-800">Abertura de Caixa</h3>
+                <button 
+                  onClick={() => setIsNewPdvModalOpen(false)}
+                  className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <form onSubmit={handleCreatePdv} className="p-6 space-y-4 overflow-y-auto">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Filial Selecionada</label>
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-slate-700 font-bold flex items-center gap-2">
+                    <Store className="w-4 h-4 text-indigo-600" />
+                    {selectedBranch?.nomeFilial || 'Nenhuma filial selecionada'}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Operador PDV</label>
+                  <select 
+                    name="usuarioPdvId"
+                    required
+                    className="w-full p-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                  >
+                    <option value="">Selecione um operador...</option>
+                    {posUsers.filter(u => u.acessoCaixa).map(u => (
+                      <option key={u.usuarioCaixaPdvEntityId} value={u.usuarioCaixaPdvEntityId}>
+                        {u.usuarioCaixaPdvEntityNome} ({u.apelidoOperadorCaixa})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Período</label>
+                  <select 
+                    name="descricaoPeriodo"
+                    required
+                    className="w-full p-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                  >
+                    <option value="">Selecione o período...</option>
+                    <option value="Almoço">Almoço</option>
+                    <option value="Janta">Janta</option>
+                    <option value="Dia">Dia</option>
+                    <option value="Noite">Noite</option>
+                  </select>
+                </div>
+
+                <div className="pt-4">
+                  <button 
+                    type="submit"
+                    disabled={pdvFormLoading}
+                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {pdvFormLoading ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-5 h-5" />
+                        Confirmar Abertura
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Product Price Create/Edit Modal */}
       <AnimatePresence>

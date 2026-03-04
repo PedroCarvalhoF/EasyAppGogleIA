@@ -69,3 +69,15 @@ export interface LinkedUser {
   emailUsuarioVinculado: string;
   acessoPermitido: boolean;
 }
+
+export interface PdvAberto {
+  id: string;
+  aberto: boolean;
+  filialPdvId: string;
+  filialPdv: string;
+  usuarioPdvId: string;
+  usuario: string;
+  createAt: string;
+  descricao: string;
+  descricaoPeriodo: string;
+}
