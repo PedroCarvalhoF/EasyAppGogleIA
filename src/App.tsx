@@ -37,10 +37,17 @@ import {
   Wallet,
   Receipt,
   BarChart3,
-  Calendar
+  Calendar,
+  Clock,
+  ShoppingBag,
+  TrendingUp,
+  XCircle,
+  CreditCard,
+  Banknote,
+  QrCode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Category, UnitOfMeasure, Branch, PriceCategory, ProductPrice, UsuarioPdv, LinkedUser, PdvAberto } from './types';
+import { Product, Category, UnitOfMeasure, Branch, PriceCategory, ProductPrice, UsuarioPdv, LinkedUser, PdvAberto, Pedido } from './types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // Mock Data
@@ -49,6 +56,7 @@ const INITIAL_CATEGORIES: Category[] = [];
 type View = 'products' | 'auth' | 'branches' | 'people' | 'pdv';
 type ProductSubView = 'menu' | 'list' | 'categories' | 'units' | 'prices' | 'stock' | 'priceCategories' | 'assignPrices';
 type PeopleSubView = 'menu' | 'posUsers' | 'customers' | 'suppliers';
+type PdvSubView = 'caixasAbertos' | 'gestaoPedidos' | 'novoPedido' | 'orderDetails' | 'payment';
 
 const API_BASE_URL = 'https://2d4l53ph-7141.brs.devtunnels.ms';
 
@@ -203,14 +211,37 @@ export default function App() {
   const [linkedUsers, setLinkedUsers] = useState<LinkedUser[]>([]);
   const [selectedLinkedUserId, setSelectedLinkedUserId] = useState('');
   const [posUserNickname, setPosUserNickname] = useState('');
-  const [posUserPassword, setPosUserPassword] = useState<number>(0);
+  const [posUserPassword, setPosUserPassword] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [productsWithPrices, setProductsWithPrices] = useState<any[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
 
   // PDV State
   const [pdvsAbertos, setPdvsAbertos] = useState<PdvAberto[]>([]);
   const [pdvLoading, setPdvLoading] = useState(false);
   const [isNewPdvModalOpen, setIsNewPdvModalOpen] = useState(false);
   const [pdvFormLoading, setPdvFormLoading] = useState(false);
+  const [selectedPdvSession, setSelectedPdvSession] = useState<PdvAberto | null>(null);
+  const [pdvSubView, setPdvSubView] = useState<PdvSubView>('caixasAbertos');
+  const [newOrderMesaCliente, setNewOrderMesaCliente] = useState('');
+  const [selectedPriceCategoryId, setSelectedPriceCategoryId] = useState<string | null>(null);
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<Pedido | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState('Todos');
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmDialog({ isOpen: true, title, message, onConfirm });
+  };
+
+  const [orderFilter, setOrderFilter] = useState<'Todos' | 'Abertos' | 'Finalizados' | 'Cancelados'>('Todos');
+  const [orderSearch, setOrderSearch] = useState('');
 
   // Product Prices State
   const [productPrices, setProductPrices] = useState<ProductPrice[]>([]);
@@ -240,10 +271,50 @@ export default function App() {
   }, [user?.token]);
 
   useEffect(() => {
-    if (currentView === 'products' && (productSubView === 'priceCategories' || productSubView === 'assignPrices') && user) {
+    if (((currentView === 'products' && (productSubView === 'priceCategories' || productSubView === 'assignPrices')) || (currentView === 'pdv' && pdvSubView === 'novoPedido')) && user) {
       fetchPriceCategories();
     }
-  }, [currentView, productSubView, user, fetchPriceCategories]);
+  }, [currentView, productSubView, pdvSubView, user, fetchPriceCategories]);
+
+  const handleCreateOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.token || !selectedPdvSession || !newOrderMesaCliente || !selectedPriceCategoryId) {
+      setToast({ message: 'Por favor, preencha todos os campos e selecione uma categoria.', type: 'error' });
+      return;
+    }
+
+    setOrderLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pedido/novo-pedido`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          pontoVendaEntityId: selectedPdvSession.id,
+          numeroPedido: newOrderMesaCliente,
+          categoriaPrecoProdutoEntityId: selectedPriceCategoryId
+        })
+      });
+
+      const result = await response.json();
+      if (result.status) {
+        setToast({ message: 'Pedido gerado com sucesso!', type: 'success' });
+        setSelectedOrder(result.data);
+        setPdvSubView('orderDetails');
+        setNewOrderMesaCliente('');
+        setSelectedPriceCategoryId(null);
+      } else {
+        setToast({ message: result.mensagem || 'Erro ao gerar pedido', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Erro ao gerar pedido:', error);
+      setToast({ message: 'Erro de conexão com o servidor', type: 'error' });
+    } finally {
+      setOrderLoading(false);
+    }
+  };
 
   // POS Users API Handlers
   const fetchPosUsers = useCallback(async () => {
@@ -283,6 +354,222 @@ export default function App() {
       setPdvLoading(false);
     }
   }, [user?.token]);
+
+  const fetchOrderDetails = useCallback(async (pedidoId: string) => {
+    if (!user?.token) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pedido/get-pedido`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({ id: pedidoId })
+      });
+      const result = await response.json();
+      if (result.status && result.data) {
+        const order = Array.isArray(result.data) ? result.data[0] : result.data;
+        setSelectedOrder(order);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar detalhes do pedido:', error);
+    }
+  }, [user?.token]);
+
+  const handleInsertItemPedido = async (produtoId: string, quantidade: number, preco: number, desconto: number = 0, observacao: string = '') => {
+    if (!user?.token || !selectedOrder) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pedido/inserir-item-pedido`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          produtoId,
+          quantidade,
+          preco,
+          desconto,
+          observacao,
+          pedidoId: selectedOrder.id
+        })
+      });
+      const result = await response.json();
+      if (result.status) {
+        setSelectedOrder(result.data);
+        setToast({ message: 'Item inserido com sucesso!', type: 'success' });
+      } else {
+        setToast({ message: result.mensagem || 'Erro ao inserir item', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Erro ao inserir item:', error);
+      setToast({ message: 'Erro de conexão', type: 'error' });
+    }
+  };
+
+  const handleRemoveItemPedido = async (idItemPedido: string) => {
+    if (!user?.token || !selectedOrder) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pedido/remover-item-pedido`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          idPedido: selectedOrder.id,
+          idItemPedido
+        })
+      });
+      const result = await response.json();
+      if (result.status) {
+        setToast({ message: 'Item removido com sucesso!', type: 'success' });
+        fetchOrderDetails(selectedOrder.id);
+      } else {
+        setToast({ message: result.mensagem || 'Erro ao remover item', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Erro ao remover item:', error);
+    }
+  };
+
+  const handleAddItemToOrder = (product: any) => {
+    handleInsertItemPedido(product.produtoEntityId, 1, product.precoProduto);
+  };
+
+  const handleRemoveItemFromOrder = (itemId: string) => {
+    handleRemoveItemPedido(itemId);
+  };
+
+  const handleRemoveAllItemsPedido = async () => {
+    if (!user?.token || !selectedOrder) return;
+    showConfirm(
+      'Remover todos os itens',
+      'Deseja realmente remover TODOS os itens deste pedido?',
+      async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/pedido/remover-todos-itens-pedido`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${user.token}`
+            },
+            body: JSON.stringify({
+              pedidoId: selectedOrder.id
+            })
+          });
+          const result = await response.json();
+          if (result.status) {
+            fetchOrderDetails(selectedOrder.id);
+            setToast({ message: 'Todos os itens removidos!', type: 'success' });
+          }
+        } catch (error) {
+          console.error('Erro ao remover todos os itens:', error);
+        }
+      }
+    );
+  };
+
+  const handleCancelPedido = async () => {
+    if (!user?.token || !selectedOrder) return;
+    showConfirm(
+      'Cancelar pedido',
+      'Deseja realmente CANCELAR este pedido?',
+      async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/pedido/cancelar-pedido`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${user.token}`
+            },
+            body: JSON.stringify({
+              pedidoId: selectedOrder.id
+            })
+          });
+          const result = await response.json();
+          if (result.status) {
+            setToast({ message: 'Pedido cancelado!', type: 'success' });
+            setPdvSubView('gestaoPedidos');
+            fetchPedidos();
+          }
+        } catch (error) {
+          console.error('Erro ao cancelar pedido:', error);
+        }
+      }
+    );
+  };
+
+  const fetchProductsWithPrices = useCallback(async (priceCategoryId: string) => {
+    if (!user?.token) return;
+    setLoadingProducts(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/precoproduto/consultar-preco-produto`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          categoriaPrecoProdutoEntityId: priceCategoryId
+        })
+      });
+      const result = await response.json();
+      if (result.status && Array.isArray(result.data)) {
+        setProductsWithPrices(result.data);
+      } else {
+        setProductsWithPrices([]);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar produtos com preços:', error);
+      setProductsWithPrices([]);
+    } finally {
+      setLoadingProducts(false);
+    }
+  }, [user?.token]);
+
+  const fetchPedidos = useCallback(async () => {
+    if (!user?.token || !selectedPdvSession) return;
+    setOrderLoading(true);
+    try {
+      // Fetch all orders for the PDV session to allow correct accounting
+      const body: any = {
+        pontoVendaEnitityId: selectedPdvSession.id
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/pedido/get-pedido`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify(body)
+      });
+      const result = await response.json();
+      if (result.status && Array.isArray(result.data)) {
+        setPedidos(result.data);
+      } else {
+        setPedidos([]);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar pedidos:', error);
+      setPedidos([]);
+    } finally {
+      setOrderLoading(false);
+    }
+  }, [user?.token, selectedPdvSession]);
+
+  useEffect(() => {
+    if (currentView === 'pdv' && pdvSubView === 'gestaoPedidos' && selectedPdvSession && user) {
+      fetchPedidos();
+    }
+  }, [currentView, pdvSubView, selectedPdvSession, user, fetchPedidos]);
+
+  useEffect(() => {
+    if (currentView === 'pdv' && pdvSubView === 'orderDetails' && selectedOrder && user) {
+      fetchProductsWithPrices(selectedOrder.categoriaPrecoProdutoEntityId);
+    }
+  }, [currentView, pdvSubView, selectedOrder, user, fetchProductsWithPrices]);
 
   useEffect(() => {
     if (currentView === 'pdv' && user) {
@@ -446,7 +733,7 @@ export default function App() {
         },
         body: JSON.stringify({
           usuarioCaixaPdvEntityId: selectedLinkedUserId,
-          senhaUsuarioPdv: posUserPassword,
+          senhaUsuarioPdv: parseInt(posUserPassword) || 0,
           apelidoOperadorCaixa: posUserNickname
         })
       });
@@ -457,7 +744,7 @@ export default function App() {
         setIsPosUserModalOpen(false);
         setSelectedLinkedUserId('');
         setPosUserNickname('');
-        setPosUserPassword(0);
+        setPosUserPassword('');
       } else {
         setToast({ message: result.mensagem || 'Erro ao cadastrar usuário PDV', type: 'error' });
       }
@@ -1368,166 +1655,671 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="min-h-screen bg-slate-50"
+              className="min-h-screen bg-slate-50 flex flex-col"
             >
               {/* PDV Header */}
               <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-4 flex items-center justify-between sticky top-0 z-20">
-                <button 
-                  onClick={() => setCurrentView('products')}
-                  className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors font-bold text-sm"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  Sair PDV
-                </button>
-                <div className="flex items-center gap-3">
-                  <div className="hidden sm:flex flex-col items-end">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Operador</span>
-                    <span className="text-sm font-black text-slate-700">{user?.name}</span>
+                <div className="flex items-center gap-4">
+                  <button 
+                    onClick={() => {
+                      if (pdvSubView === 'caixasAbertos') {
+                        setCurrentView('products');
+                      } else if (pdvSubView === 'gestaoPedidos') {
+                        setPdvSubView('caixasAbertos');
+                        setSelectedPdvSession(null);
+                      } else if (pdvSubView === 'novoPedido' || pdvSubView === 'orderDetails') {
+                        setPdvSubView('gestaoPedidos');
+                      } else if (pdvSubView === 'payment') {
+                        setPdvSubView('orderDetails');
+                      }
+                    }}
+                    className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors font-bold text-sm"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    {pdvSubView === 'caixasAbertos' ? 'Sair PDV' : 'Voltar'}
+                  </button>
+                  <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+                  <div className="hidden sm:flex items-center gap-2">
+                    <Store className="w-4 h-4 text-indigo-600" />
+                    <span className="text-xs font-black text-slate-400 uppercase tracking-widest">PDV</span>
+                    <ChevronRight className="w-3 h-3 text-slate-300" />
+                    <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">
+                      {pdvSubView === 'caixasAbertos' ? 'Caixas Abertos' : 
+                       pdvSubView === 'gestaoPedidos' ? 'Gestão de Pedidos' :
+                       pdvSubView === 'novoPedido' ? 'Novo Pedido' :
+                       pdvSubView === 'orderDetails' ? 'Itens do Pedido' : 'Pagamento'}
+                    </span>
                   </div>
-                  <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
-                    <User className="w-5 h-5" />
+                </div>
+                
+                <div className="flex items-center gap-6">
+                  {selectedPdvSession && (
+                    <div className="hidden lg:flex items-center gap-4 px-4 py-2 bg-slate-50 rounded-2xl border border-slate-100">
+                      <div className="flex flex-col items-start">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Sessão Ativa</span>
+                        <span className="text-xs font-black text-slate-700 leading-none">{selectedPdvSession.descricaoPeriodo}</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <div className="hidden sm:flex flex-col items-end">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Operador</span>
+                      <span className="text-sm font-black text-slate-700 leading-none">{user?.name}</span>
+                    </div>
+                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 shadow-sm border border-indigo-100">
+                      <User className="w-5 h-5" />
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="max-w-[1600px] mx-auto p-4 sm:p-8">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  {/* Left 2/3: Open PDVs */}
-                  <div className="lg:col-span-2 space-y-8">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h2 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
-                          <Store className="w-8 h-8 text-indigo-600" />
-                          Caixas Abertos
-                        </h2>
-                        <p className="text-slate-500 font-medium mt-1">Sessões de venda ativas no momento</p>
+              <div className="flex-1 overflow-y-auto">
+                {pdvSubView === 'caixasAbertos' && (
+                  <div className="max-w-[1600px] mx-auto p-4 sm:p-8">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                      {/* Left 2/3: Open PDVs */}
+                      <div className="lg:col-span-2 space-y-8">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h2 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
+                              <Store className="w-8 h-8 text-indigo-600" />
+                              Caixas Abertos
+                            </h2>
+                            <p className="text-slate-500 font-medium mt-1">Sessões de venda ativas no momento</p>
+                          </div>
+                          <button 
+                            onClick={fetchPdvsAbertos}
+                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                            title="Atualizar"
+                          >
+                            <RefreshCw className={`w-5 h-5 ${pdvLoading ? 'animate-spin' : ''}`} />
+                          </button>
+                        </div>
+
+                        {pdvLoading ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {[1, 2, 3, 4].map((i) => (
+                              <div key={i} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-pulse">
+                                <div className="flex items-center gap-4 mb-4">
+                                  <div className="w-12 h-12 bg-slate-100 rounded-2xl" />
+                                  <div className="flex-1 space-y-2">
+                                    <div className="h-4 bg-slate-100 rounded w-3/4" />
+                                    <div className="h-3 bg-slate-100 rounded w-1/2" />
+                                  </div>
+                                </div>
+                                <div className="h-10 bg-slate-50 rounded-xl" />
+                              </div>
+                            ))}
+                          </div>
+                        ) : pdvsAbertos.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {pdvsAbertos.map((pdv) => (
+                              <motion.div 
+                                key={pdv.id}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group"
+                              >
+                                <div className="flex items-center justify-between mb-4">
+                                  <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                      <User className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                      <h4 className="font-black text-slate-800">{pdv.usuario}</h4>
+                                      <p className="text-xs text-slate-400 font-medium">{pdv.filialPdv}</p>
+                                    </div>
+                                  </div>
+                                  <div className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-wider">
+                                    Aberto
+                                  </div>
+                                </div>
+                                
+                                <div className="space-y-3 mb-6">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-slate-400 font-medium">Abertura</span>
+                                    <span className="text-slate-700 font-bold">{new Date(pdv.createAt).toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-slate-400 font-medium">Período</span>
+                                    <span className="text-slate-700 font-bold">{pdv.descricaoPeriodo}</span>
+                                  </div>
+                                  {pdv.descricao && (
+                                    <div className="p-3 bg-slate-50 rounded-xl text-[11px] text-slate-500 font-medium italic">
+                                      "{pdv.descricao}"
+                                    </div>
+                                  )}
+                                </div>
+
+                                <button 
+                                  onClick={() => {
+                                    setSelectedPdvSession(pdv);
+                                    setPdvSubView('gestaoPedidos');
+                                  }}
+                                  className="w-full py-3 bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-600 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+                                >
+                                  Assumir Caixa
+                                  <ChevronRight className="w-4 h-4" />
+                                </button>
+                              </motion.div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="py-20 text-center text-slate-400 bg-white rounded-[2.5rem] border border-dashed border-slate-200">
+                            <Store className="w-16 h-16 mx-auto mb-4 opacity-10" />
+                            <p className="text-lg font-black text-slate-800">Nenhum caixa aberto</p>
+                            <p className="text-sm font-medium">Inicie uma nova sessão no painel ao lado.</p>
+                          </div>
+                        )}
                       </div>
-                      <button 
-                        onClick={fetchPdvsAbertos}
-                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
-                        title="Atualizar"
-                      >
-                        <RefreshCw className={`w-5 h-5 ${pdvLoading ? 'animate-spin' : ''}`} />
-                      </button>
+
+                      {/* Right 1/3: PDV Actions */}
+                      <div className="space-y-6">
+                        <div className="bg-indigo-600 p-8 rounded-[2rem] text-white shadow-2xl shadow-indigo-200 relative overflow-hidden group">
+                          <div className="relative z-10">
+                            <h3 className="text-2xl font-black mb-2">Novo Caixa</h3>
+                            <p className="text-indigo-100 text-sm font-medium mb-6">Inicie uma nova sessão de vendas agora.</p>
+                            <button 
+                              onClick={() => setIsNewPdvModalOpen(true)}
+                              className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black shadow-lg hover:bg-indigo-50 transition-all active:scale-95 flex items-center justify-center gap-2"
+                            >
+                              <Plus className="w-5 h-5" />
+                              Abrir Caixa
+                            </button>
+                          </div>
+                          <Box className="absolute -right-8 -bottom-8 w-48 h-48 text-white/10 rotate-12 group-hover:rotate-0 transition-transform duration-500" />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4">
+                          <button className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 group">
+                            <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                              <Search className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <h4 className="font-black text-slate-800">Consultas Detalhadas</h4>
+                              <p className="text-xs text-slate-400 font-medium">Histórico e relatórios de vendas</p>
+                            </div>
+                          </button>
+
+                          <button 
+                            onClick={() => {
+                              setCurrentView('people');
+                              setPeopleSubView('posUsers');
+                            }}
+                            className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 group"
+                          >
+                            <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                              <ShieldCheck className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <h4 className="font-black text-slate-800">Usuários PDV</h4>
+                              <p className="text-xs text-slate-400 font-medium">Gerenciar permissões e acessos</p>
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {pdvSubView === 'gestaoPedidos' && (
+                  <div className="max-w-[1600px] mx-auto p-4 sm:p-8 space-y-8">
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+                      {[
+                        { label: 'Abertos', value: pedidos.filter(p => !p.finalizado && !p.cancelado).length, icon: Clock, color: 'bg-indigo-50 text-indigo-600' },
+                        { label: 'Finalizados', value: pedidos.filter(p => p.finalizado && !p.cancelado).length, icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-600' },
+                        { label: 'Cancelados', value: pedidos.filter(p => p.cancelado).length, icon: XCircle, color: 'bg-rose-50 text-rose-600' },
+                        { 
+                          label: 'Ticket Médio', 
+                          value: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
+                            pedidos.filter(p => p.finalizado && !p.cancelado).length > 0
+                              ? pedidos.filter(p => p.finalizado && !p.cancelado).reduce((acc, curr) => acc + curr.totalPedido, 0) / pedidos.filter(p => p.finalizado && !p.cancelado).length
+                              : 0
+                          ), 
+                          icon: TrendingUp, 
+                          color: 'bg-amber-50 text-amber-600' 
+                        },
+                      ].map((stat, i) => (
+                        <motion.div
+                          key={stat.label}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: i * 0.1 }}
+                          className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center gap-4"
+                        >
+                          <div className={`p-4 rounded-2xl ${stat.color}`}>
+                            <stat.icon className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{stat.label}</p>
+                            <p className="text-2xl font-black text-slate-800">{stat.value}</p>
+                          </div>
+                        </motion.div>
+                      ))}
                     </div>
 
-                    {pdvLoading ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {[1, 2, 3, 4].map((i) => (
-                          <div key={i} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-pulse">
-                            <div className="flex items-center gap-4 mb-4">
-                              <div className="w-12 h-12 bg-slate-100 rounded-2xl" />
-                              <div className="flex-1 space-y-2">
-                                <div className="h-4 bg-slate-100 rounded w-3/4" />
-                                <div className="h-3 bg-slate-100 rounded w-1/2" />
-                              </div>
-                            </div>
-                            <div className="h-10 bg-slate-50 rounded-xl" />
-                          </div>
-                        ))}
-                      </div>
-                    ) : pdvsAbertos.length > 0 ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {pdvsAbertos.map((pdv) => (
-                          <motion.div 
-                            key={pdv.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group"
+                    {/* Filters & Search */}
+                    <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                      <div className="flex bg-slate-100 p-1 rounded-2xl w-full sm:w-auto overflow-x-auto">
+                        {['Todos', 'Abertos', 'Finalizados', 'Cancelados'].map((filter) => (
+                          <button
+                            key={filter}
+                            onClick={() => setOrderFilter(filter as any)}
+                            className={`px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${
+                              orderFilter === filter ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                            }`}
                           >
-                            <div className="flex items-center justify-between mb-4">
-                              <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                                  <User className="w-6 h-6" />
-                                </div>
-                                <div>
-                                  <h4 className="font-black text-slate-800">{pdv.usuario}</h4>
-                                  <p className="text-xs text-slate-400 font-medium">{pdv.filialPdv}</p>
-                                </div>
-                              </div>
-                              <div className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-wider">
-                                Aberto
-                              </div>
-                            </div>
-                            
-                            <div className="space-y-3 mb-6">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-slate-400 font-medium">Abertura</span>
-                                <span className="text-slate-700 font-bold">{new Date(pdv.createAt).toLocaleString()}</span>
-                              </div>
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-slate-400 font-medium">Período</span>
-                                <span className="text-slate-700 font-bold">{pdv.descricaoPeriodo}</span>
-                              </div>
-                              {pdv.descricao && (
-                                <div className="p-3 bg-slate-50 rounded-xl text-[11px] text-slate-500 font-medium italic">
-                                  "{pdv.descricao}"
-                                </div>
-                              )}
-                            </div>
-
-                            <button className="w-full py-3 bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-600 rounded-xl font-bold transition-all flex items-center justify-center gap-2">
-                              Assumir Caixa
-                              <ChevronRight className="w-4 h-4" />
-                            </button>
-                          </motion.div>
+                            {filter}
+                          </button>
                         ))}
                       </div>
-                    ) : (
-                      <div className="py-20 text-center text-slate-400 bg-white rounded-[2.5rem] border border-dashed border-slate-200">
-                        <Store className="w-16 h-16 mx-auto mb-4 opacity-10" />
-                        <p className="text-lg font-black text-slate-800">Nenhum caixa aberto</p>
-                        <p className="text-sm font-medium">Inicie uma nova sessão no painel ao lado.</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Right 1/3: PDV Actions */}
-                  <div className="space-y-6">
-                    <div className="bg-indigo-600 p-8 rounded-[2rem] text-white shadow-2xl shadow-indigo-200 relative overflow-hidden group">
-                      <div className="relative z-10">
-                        <h3 className="text-2xl font-black mb-2">Novo Caixa</h3>
-                        <p className="text-indigo-100 text-sm font-medium mb-6">Inicie uma nova sessão de vendas agora.</p>
+                      <div className="flex gap-4 w-full sm:w-auto">
+                        <div className="relative flex-1 sm:w-64">
+                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Buscar pedido..."
+                            value={orderSearch}
+                            onChange={(e) => setOrderSearch(e.target.value)}
+                            className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                          />
+                        </div>
                         <button 
-                          onClick={() => setIsNewPdvModalOpen(true)}
-                          className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black shadow-lg hover:bg-indigo-50 transition-all active:scale-95 flex items-center justify-center gap-2"
+                          onClick={() => setPdvSubView('novoPedido')}
+                          className="px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center gap-2 hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
                         >
                           <Plus className="w-5 h-5" />
-                          Abrir Caixa
+                          <span className="hidden sm:inline">Novo Pedido</span>
                         </button>
                       </div>
-                      <Box className="absolute -right-8 -bottom-8 w-48 h-48 text-white/10 rotate-12 group-hover:rotate-0 transition-transform duration-500" />
                     </div>
 
-                    <div className="grid grid-cols-1 gap-4">
-                      <button className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 group">
-                        <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                          <Search className="w-6 h-6" />
-                        </div>
-                        <div>
-                          <h4 className="font-black text-slate-800">Consultas Detalhadas</h4>
-                          <p className="text-xs text-slate-400 font-medium">Histórico e relatórios de vendas</p>
-                        </div>
-                      </button>
-
-                      <button 
-                        onClick={() => {
-                          setCurrentView('people');
-                          setPeopleSubView('posUsers');
-                        }}
-                        className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 group"
-                      >
-                        <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                          <ShieldCheck className="w-6 h-6" />
-                        </div>
-                        <div>
-                          <h4 className="font-black text-slate-800">Usuários PDV</h4>
-                          <p className="text-xs text-slate-400 font-medium">Gerenciar permissões e acessos</p>
-                        </div>
-                      </button>
+                    {/* Orders Table */}
+                    <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50/50">
+                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Pedido</th>
+                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Mesa/Cliente</th>
+                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Abertura</th>
+                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">Total</th>
+                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {orderLoading ? (
+                              <tr>
+                                <td colSpan={6} className="px-6 py-12 text-center text-slate-400 font-medium">Carregando pedidos...</td>
+                              </tr>
+                            ) : pedidos.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="px-6 py-12 text-center text-slate-400 font-medium">Nenhum pedido encontrado.</td>
+                              </tr>
+                            ) : pedidos
+                              .filter(p => {
+                                if (orderFilter === 'Abertos') return !p.finalizado && !p.cancelado;
+                                if (orderFilter === 'Finalizados') return p.finalizado && !p.cancelado;
+                                if (orderFilter === 'Cancelados') return p.cancelado;
+                                return true;
+                              })
+                              .filter(p => p.numeroPedido.toLowerCase().includes(orderSearch.toLowerCase()))
+                              .map((pedido) => (
+                              <tr key={pedido.id} className="hover:bg-slate-50/50 transition-colors group">
+                                <td className="px-6 py-5">
+                                  <span className="font-black text-slate-700">#{pedido.numeroPedido}</span>
+                                </td>
+                                <td className="px-6 py-5">
+                                  <span className="text-sm font-bold text-slate-600">{pedido.mesaCliente || '-'}</span>
+                                </td>
+                                <td className="px-6 py-5">
+                                  <span className="text-sm text-slate-500">{new Date(pedido.abertura).toLocaleString('pt-BR')}</span>
+                                </td>
+                                <td className="px-6 py-5">
+                                  {pedido.cancelado ? (
+                                    <span className="px-3 py-1 bg-rose-50 text-rose-600 rounded-full text-xs font-black uppercase tracking-wider">Cancelado</span>
+                                  ) : pedido.finalizado ? (
+                                    <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-xs font-black uppercase tracking-wider">Finalizado</span>
+                                  ) : (
+                                    <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-black uppercase tracking-wider">Aberto</span>
+                                  )}
+                                </td>
+                                <td className="px-6 py-5 text-right">
+                                  <span className="font-black text-slate-800">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(pedido.totalPedido)}</span>
+                                </td>
+                                <td className="px-6 py-5">
+                                  <div className="flex justify-center">
+                                    <button 
+                                      onClick={() => {
+                                        setSelectedOrder(pedido);
+                                        setPdvSubView('orderDetails');
+                                      }}
+                                      className="p-2 hover:bg-white hover:shadow-md rounded-xl text-slate-400 hover:text-indigo-600 transition-all"
+                                    >
+                                      <ChevronRight className="w-5 h-5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
+
+                {pdvSubView === 'novoPedido' && (
+                  <div className="max-w-[1600px] mx-auto p-4 sm:p-8 flex items-center justify-center min-h-[60vh]">
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="bg-white p-8 sm:p-12 rounded-[3rem] shadow-xl border border-slate-100 w-full max-w-2xl"
+                    >
+                      <div className="flex items-center gap-6 mb-12">
+                        <div className="p-5 bg-indigo-50 rounded-3xl text-indigo-600">
+                          <ShoppingBag className="w-8 h-8" />
+                        </div>
+                        <div>
+                          <h2 className="text-3xl font-black text-slate-800">Novo Pedido</h2>
+                          <p className="text-slate-400 font-medium">Inicie uma nova venda no balcão</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-8">
+                        <div className="space-y-3">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Mesa / Cliente</label>
+                          <input
+                            type="text"
+                            value={newOrderMesaCliente}
+                            onChange={(e) => setNewOrderMesaCliente(e.target.value)}
+                            placeholder="Ex: Mesa 05 ou Nome do Cliente"
+                            className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                          />
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Categoria de Preço</label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {priceCategories.map((cat) => (
+                              <button
+                                key={cat.id}
+                                onClick={() => setSelectedPriceCategoryId(cat.id)}
+                                className={`px-6 py-4 rounded-2xl text-sm font-black transition-all border-2 ${
+                                  selectedPriceCategoryId === cat.id
+                                    ? 'bg-indigo-50 border-indigo-600 text-indigo-600'
+                                    : 'bg-white border-slate-100 text-slate-500 hover:border-slate-200'
+                                }`}
+                              >
+                                {cat.categoriaPreco}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex gap-4 pt-6">
+                          <button
+                            onClick={() => setPdvSubView('gestaoPedidos')}
+                            className="flex-1 py-5 bg-slate-100 text-slate-600 rounded-2xl font-black hover:bg-slate-200 transition-all"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={handleCreateOrder}
+                            disabled={orderLoading}
+                            className="flex-[2] py-5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-3"
+                          >
+                            {orderLoading ? 'Gerando...' : (
+                              <>
+                                <CheckCircle2 className="w-6 h-6" />
+                                Gerar Novo Pedido
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </div>
+                )}
+
+                {pdvSubView === 'orderDetails' && selectedOrder && (
+                  <div className="max-w-[1600px] mx-auto p-4 sm:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    {/* Left Column: Product Selection */}
+                    <div className="lg:col-span-8 space-y-8">
+                      <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                        <div className="relative w-full sm:w-96">
+                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Buscar produto..."
+                            value={productSearch}
+                            onChange={(e) => setProductSearch(e.target.value)}
+                            className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                          />
+                        </div>
+                        <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl w-full sm:w-auto overflow-x-auto">
+                          {['Todos', ...new Set(productsWithPrices.map(p => p.categoriaProduto))].map((cat) => (
+                            <button
+                              key={cat}
+                              onClick={() => setSelectedCategory(cat)}
+                              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                                selectedCategory === cat ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                              }`}
+                            >
+                              {cat}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {loadingProducts ? (
+                          <div className="col-span-full py-12 text-center text-slate-400 font-medium">Carregando produtos...</div>
+                        ) : productsWithPrices.length === 0 ? (
+                          <div className="col-span-full py-12 text-center text-slate-400 font-medium">Nenhum produto encontrado para esta categoria de preço.</div>
+                        ) : productsWithPrices
+                          .filter(p => selectedCategory === 'Todos' || p.categoriaProduto === selectedCategory)
+                          .filter(p => p.nomeProduto.toLowerCase().includes(productSearch.toLowerCase()))
+                          .map((product) => (
+                          <motion.button
+                            key={product.id}
+                            whileHover={{ y: -4 }}
+                            onClick={() => handleAddItemToOrder(product)}
+                            className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:border-indigo-100 transition-all text-left group flex flex-col h-full"
+                          >
+                            <div className="w-full aspect-square bg-slate-50 rounded-2xl mb-4 flex items-center justify-center group-hover:bg-indigo-50 transition-colors overflow-hidden">
+                              <Package className="w-8 h-8 text-slate-300 group-hover:text-indigo-600" />
+                            </div>
+                            <h4 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2 flex-grow">{product.nomeProduto}</h4>
+                            <p className="text-xs text-slate-400 font-medium mb-3">{product.categoriaProduto}</p>
+                            <div className="flex items-center justify-between mt-auto">
+                              <span className="font-black text-indigo-600">
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(product.precoProduto)}
+                              </span>
+                              <div className="p-2 bg-slate-50 rounded-xl text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                                <Plus className="w-4 h-4" />
+                              </div>
+                            </div>
+                          </motion.button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Right Column: Order Summary */}
+                    <div className="lg:col-span-4">
+                      <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 flex flex-col sticky top-8 max-h-[calc(100vh-8rem)] overflow-hidden">
+                        <div className="p-6 border-bottom border-slate-50 bg-slate-50/50">
+                          <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-xl font-black text-slate-800">Resumo do Pedido</h3>
+                            <span className="px-3 py-1 bg-indigo-100 text-indigo-600 rounded-full text-xs font-black">#{selectedOrder.numeroPedido}</span>
+                          </div>
+                          <p className="text-sm text-slate-500 font-medium">{selectedOrder.mesaCliente || 'Balcão'}</p>
+                        </div>
+
+                        <div className="flex-grow overflow-y-auto p-6 space-y-4">
+                          {selectedOrder.itensPedido && selectedOrder.itensPedido.length > 0 ? (
+                            selectedOrder.itensPedido.filter(item => !item.itemPedidoCancelado).map((item) => (
+                              <div key={item.idItemPedido} className="flex items-center gap-4 group">
+                                <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 font-black text-xs">
+                                  {item.quantidade}x
+                                </div>
+                                <div className="flex-grow">
+                                  <h5 className="text-sm font-bold text-slate-700 line-clamp-1">{item.nomeProduto}</h5>
+                                  <p className="text-xs text-slate-400 font-medium">
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.preco)} cada
+                                  </p>
+                                </div>
+                                <div className="text-right flex flex-col items-end gap-1">
+                                  <span className="text-sm font-black text-slate-800">
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.totalItem)}
+                                  </span>
+                                  <button 
+                                    onClick={() => handleRemoveItemFromOrder(item.idItemPedido)}
+                                    className="p-1 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-12">
+                              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+                                <ShoppingBag className="w-8 h-8" />
+                              </div>
+                              <p className="text-slate-400 font-medium">Nenhum item adicionado</p>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-8 bg-slate-50 border-t border-slate-100 space-y-6">
+                          <div className="space-y-2">
+                            <div className="flex justify-between text-slate-500 text-sm font-medium">
+                              <span>Subtotal</span>
+                              <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedOrder.totalPedido)}</span>
+                            </div>
+                            <div className="flex justify-between text-slate-800 text-xl font-black pt-2 border-t border-slate-200">
+                              <span>Total</span>
+                              <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedOrder.totalPedido)}</span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <button 
+                              onClick={() => handleCancelPedido()}
+                              className="py-4 bg-white border border-slate-200 text-slate-500 rounded-2xl font-black hover:bg-rose-50 hover:text-rose-600 hover:border-rose-100 transition-all flex items-center justify-center gap-2"
+                            >
+                              <XCircle className="w-5 h-5" />
+                              Cancelar
+                            </button>
+                            <button 
+                              onClick={() => setPdvSubView('payment')}
+                              disabled={!selectedOrder.itens || selectedOrder.itens.length === 0}
+                              className="py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <CreditCard className="w-5 h-5" />
+                              Pagamento
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {pdvSubView === 'payment' && selectedOrder && (
+                  <div className="max-w-[1600px] mx-auto p-4 sm:p-8 flex items-center justify-center min-h-[60vh]">
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="bg-white p-8 sm:p-12 rounded-[3rem] shadow-xl border border-slate-100 w-full max-w-4xl"
+                    >
+                      <div className="flex flex-col md:flex-row gap-12">
+                        <div className="flex-1 space-y-8">
+                          <div className="flex items-center gap-6">
+                            <div className="p-5 bg-emerald-50 rounded-3xl text-emerald-600">
+                              <CreditCard className="w-8 h-8" />
+                            </div>
+                            <div>
+                              <h2 className="text-3xl font-black text-slate-800">Pagamento</h2>
+                              <p className="text-slate-400 font-medium">Finalize o pedido #{selectedOrder.numeroPedido}</p>
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-50 p-8 rounded-[2rem] space-y-4">
+                            <div className="flex justify-between text-slate-500 font-bold uppercase tracking-widest text-xs">
+                              <span>Valor Total</span>
+                              <span>{selectedOrder.mesaCliente || 'Balcão'}</span>
+                            </div>
+                            <div className="text-5xl font-black text-slate-800">
+                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedOrder.totalPedido)}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            {[
+                              { id: 'dinheiro', label: 'Dinheiro', icon: Banknote },
+                              { id: 'cartao', label: 'Cartão', icon: CreditCard },
+                              { id: 'pix', label: 'PIX', icon: QrCode },
+                              { id: 'outros', label: 'Outros', icon: Package },
+                            ].map((method) => (
+                              <button
+                                key={method.id}
+                                className="p-6 bg-white border-2 border-slate-100 rounded-3xl flex flex-col items-center gap-4 hover:border-indigo-600 hover:bg-indigo-50 transition-all group"
+                              >
+                                <div className="p-4 bg-slate-50 rounded-2xl text-slate-400 group-hover:bg-white group-hover:text-indigo-600 transition-all">
+                                  <method.icon className="w-8 h-8" />
+                                </div>
+                                <span className="font-black text-slate-600 group-hover:text-indigo-600">{method.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="w-full md:w-80 space-y-6">
+                          <div className="bg-slate-900 text-white p-8 rounded-[2rem] space-y-6">
+                            <h4 className="font-bold text-slate-400 uppercase tracking-widest text-xs">Resumo</h4>
+                            <div className="space-y-4">
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Itens</span>
+                                <span className="font-bold">{selectedOrder.itens?.length || 0}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Desconto</span>
+                                <span className="font-bold">R$ 0,00</span>
+                              </div>
+                              <div className="pt-4 border-t border-slate-800 flex justify-between items-end">
+                                <span className="text-slate-400">Total</span>
+                                <span className="text-2xl font-black text-emerald-400">
+                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedOrder.totalPedido)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <button 
+                            onClick={() => {
+                              toast.success('Funcionalidade de pagamento em desenvolvimento');
+                              setPdvSubView('gestaoPedidos');
+                            }}
+                            className="w-full py-6 bg-emerald-500 text-white rounded-[2rem] font-black text-lg shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-all flex items-center justify-center gap-3"
+                          >
+                            <CheckCircle2 className="w-6 h-6" />
+                            Finalizar Venda
+                          </button>
+                          <button 
+                            onClick={() => setPdvSubView('orderDetails')}
+                            className="w-full py-4 text-slate-400 font-bold hover:text-slate-600 transition-all"
+                          >
+                            Voltar para o pedido
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </div>
+                )}
               </div>
             </motion.div>
           ) : (
@@ -2664,8 +3456,8 @@ export default function App() {
                   <input 
                     type="number"
                     required
-                    value={posUserPassword || ''}
-                    onChange={(e) => setPosUserPassword(parseInt(e.target.value) || 0)}
+                    value={posUserPassword}
+                    onChange={(e) => setPosUserPassword(e.target.value)}
                     placeholder="Ex: 1234"
                     className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
                   />
@@ -2687,6 +3479,40 @@ export default function App() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirm Dialog */}
+      <AnimatePresence>
+        {confirmDialog.isOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl"
+            >
+              <h3 className="text-xl font-black text-slate-800 mb-2">{confirmDialog.title}</h3>
+              <p className="text-slate-500 mb-8 font-medium">{confirmDialog.message}</p>
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black hover:bg-slate-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={() => {
+                    confirmDialog.onConfirm();
+                    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                  }}
+                  className="flex-1 py-4 bg-rose-600 text-white rounded-2xl font-black shadow-lg shadow-rose-100 hover:bg-rose-700 transition-all"
+                >
+                  Confirmar
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

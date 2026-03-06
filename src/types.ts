@@ -81,3 +81,49 @@ export interface PdvAberto {
   descricao: string;
   descricaoPeriodo: string;
 }
+
+export interface ItemPedido {
+  idItemPedido: string;
+  idProduto: string;
+  nomeProduto: string;
+  categoriaProduto: string;
+  quantidade: number;
+  preco: number;
+  desconto: number;
+  subTotalItem: number;
+  totalItem: number;
+  observacaoItem: string;
+  itemPedidoCancelado: boolean;
+  clienteId: string;
+  usuarioRegistroItemPedidoId: string;
+  usuarioNameRegistroItemPedido: string;
+  idPedido: string;
+  numeroPedido: string;
+}
+
+export interface PagamentoPedido {
+  pedidoEntityId: string;
+  numeroPedido: string;
+  formaPagamentoEntityId: string;
+  formaPagamentoEntity: string;
+  valorPagamento: number;
+}
+
+export interface Pedido {
+  id: string;
+  abertura: string;
+  fechamento: string;
+  pontoVendaEntityid: string;
+  numeroPedido: string;
+  finalizado: boolean;
+  cancelado: boolean;
+  descontoPedido: number;
+  totalPedido: number;
+  categoriaPrecoProdutoEntityId: string;
+  nomeCategoriaPreco: string;
+  usuarioRegistroId: string;
+  nomeUsuarioRegistro: string;
+  itensPedido: ItemPedido[];
+  pagamentosPedidoDtos: PagamentoPedido[];
+  troco: number;
+}
