@@ -24,6 +24,7 @@ import {
   Eye,
   EyeOff,
   LogOut,
+  Headphones,
   ShieldCheck,
   Ruler,
   Tag,
@@ -276,8 +277,8 @@ export default function App() {
     }
   }, [currentView, productSubView, pdvSubView, user, fetchPriceCategories]);
 
-  const handleCreateOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateOrder = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!user?.token || !selectedPdvSession || !newOrderMesaCliente || !selectedPriceCategoryId) {
       setToast({ message: 'Por favor, preencha todos os campos e selecione uma categoria.', type: 'error' });
       return;
@@ -301,10 +302,32 @@ export default function App() {
       const result = await response.json();
       if (result.status) {
         setToast({ message: 'Pedido gerado com sucesso!', type: 'success' });
-        setSelectedOrder(result.data);
-        setPdvSubView('orderDetails');
-        setNewOrderMesaCliente('');
-        setSelectedPriceCategoryId(null);
+        
+        const orderData = Array.isArray(result.data) ? result.data[0] : result.data;
+        let finalOrder = null;
+        if (typeof orderData === 'string') {
+          finalOrder = await fetchOrderDetails(orderData);
+        } else if (orderData && orderData.id) {
+          if (!orderData.categoriaPrecoProdutoEntityId) {
+            finalOrder = await fetchOrderDetails(orderData.id);
+          } else {
+            setSelectedOrder(orderData);
+            finalOrder = orderData;
+          }
+        } else if (orderData && typeof orderData === 'object' && Object.keys(orderData).length === 0) {
+          setToast({ message: 'Erro ao obter detalhes do pedido', type: 'error' });
+          return;
+        } else {
+          finalOrder = await fetchOrderDetails(String(orderData));
+        }
+        
+        if (finalOrder) {
+          setPdvSubView('orderDetails');
+          setNewOrderMesaCliente('');
+          setSelectedPriceCategoryId(null);
+        } else {
+          setToast({ message: 'Erro ao carregar o pedido recém-criado', type: 'error' });
+        }
       } else {
         setToast({ message: result.mensagem || 'Erro ao gerar pedido', type: 'error' });
       }
@@ -356,7 +379,7 @@ export default function App() {
   }, [user?.token]);
 
   const fetchOrderDetails = useCallback(async (pedidoId: string) => {
-    if (!user?.token) return;
+    if (!user?.token) return null;
     try {
       const response = await fetch(`${API_BASE_URL}/api/pedido/get-pedido`, {
         method: 'POST',
@@ -370,9 +393,12 @@ export default function App() {
       if (result.status && result.data) {
         const order = Array.isArray(result.data) ? result.data[0] : result.data;
         setSelectedOrder(order);
+        return order;
       }
+      return null;
     } catch (error) {
       console.error('Erro ao buscar detalhes do pedido:', error);
+      return null;
     }
   }, [user?.token]);
 
@@ -1218,109 +1244,133 @@ export default function App() {
               className="max-w-md mx-auto pt-12"
             >
               {/* Auth Form Content */}
-              <div className="bg-white rounded-[32px] sm:rounded-[40px] shadow-2xl shadow-indigo-100/50 border border-slate-100 overflow-hidden">
-                <div className="p-6 sm:p-10">
-                  <div className="text-center mb-10">
-                    <div className="w-16 h-16 sm:w-20 sm:h-20 bg-indigo-600 rounded-2xl sm:rounded-3xl flex items-center justify-center mx-auto mb-4 sm:mb-6 shadow-xl shadow-indigo-200 rotate-3">
-                      <Store className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+              <div className="bg-white rounded-[26px] shadow-[0_10px_20px_rgba(0,0,0,0.08)] border border-[#E7ECF3] overflow-hidden max-w-[420px] mx-auto">
+                <div className="p-6 sm:p-8">
+                  <div className="text-center mb-8">
+                    <div className="w-[58px] h-[58px] bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-indigo-200">
+                      <Store className="w-8 h-8 text-white" />
                     </div>
-                    <h2 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
-                      {authMode === 'login' ? 'Bem-vindo de volta' : 'Crie sua conta'}
+                    <h2 className="text-[24px] font-black text-[#1D293D] tracking-tight mb-1">
+                      Comércio Fácil
                     </h2>
-                    <p className="text-sm sm:text-base text-slate-500 mt-1 sm:mt-2 font-medium">
-                      {authMode === 'login' ? 'Acesse sua conta para gerenciar seu PDV' : 'Comece a gerenciar seu negócio hoje'}
+                    <p className="text-[13px] text-[#62748E] font-medium mb-3">
+                      Acesse sua conta para continuar
                     </p>
+                    <div className="inline-flex items-center justify-center bg-[#F3F0FF] rounded-[14px] px-3 py-1.5">
+                      <span className="text-[11px] font-black text-[#533FF6] uppercase tracking-wider">Login seguro</span>
+                    </div>
                   </div>
 
                   {authError && (
-                    <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-rose-50 border border-rose-100 rounded-xl sm:rounded-2xl flex items-center gap-2 sm:gap-3 text-rose-600 text-xs sm:text-sm font-medium animate-shake">
-                      <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+                    <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-3 text-rose-600 text-sm font-medium animate-shake">
+                      <AlertCircle className="w-5 h-5 flex-shrink-0" />
                       {authError}
                     </div>
                   )}
 
-                  <form onSubmit={authMode === 'login' ? handleLogin : handleSignup} className="space-y-4 sm:space-y-5">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">E-mail</label>
-                      <div className="relative">
-                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
+                  <form onSubmit={authMode === 'login' ? handleLogin : handleSignup} className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-black text-[#94A3B8] uppercase tracking-widest ml-1">E-mail</label>
+                      <div className="relative flex items-center bg-white border border-[#E7ECF3] rounded-[16px] p-1 focus-within:border-[#533FF6] focus-within:ring-1 focus-within:ring-[#533FF6] transition-all">
+                        <div className="bg-[#F8FAFC] p-2.5 rounded-[10px] ml-1">
+                          <Mail className="w-4 h-4 text-[#94A3B8]" />
+                        </div>
                         <input 
                           name="email"
                           type="email" 
                           required
-                          placeholder="seu@email.com"
-                          className="w-full pl-12 pr-4 py-3 sm:py-4 bg-slate-50 border-none rounded-xl sm:rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                          placeholder="seuemail@empresa.com"
+                          className="w-full pl-3 pr-4 py-3 bg-transparent border-none text-[14px] text-[#1D293D] placeholder:text-[#94A3B8] focus:ring-0 outline-none"
                         />
                       </div>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Senha</label>
-                      <div className="relative">
-                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-black text-[#94A3B8] uppercase tracking-widest ml-1">Senha</label>
+                      <div className="relative flex items-center bg-white border border-[#E7ECF3] rounded-[16px] p-1 focus-within:border-[#533FF6] focus-within:ring-1 focus-within:ring-[#533FF6] transition-all">
+                        <div className="bg-[#F8FAFC] p-2.5 rounded-[10px] ml-1">
+                          <Lock className="w-4 h-4 text-[#94A3B8]" />
+                        </div>
                         <input 
                           name="senha"
                           type={showPassword ? 'text' : 'password'} 
                           required
                           placeholder="••••••••"
-                          className="w-full pl-12 pr-12 py-3 sm:py-4 bg-slate-50 border-none rounded-xl sm:rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                          className="w-full pl-3 pr-12 py-3 bg-transparent border-none text-[14px] text-[#1D293D] placeholder:text-[#94A3B8] focus:ring-0 outline-none"
                         />
                         <button 
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
+                          className="absolute right-4 text-[#94A3B8] hover:text-[#533FF6] transition-colors"
                         >
-                          {showPassword ? <EyeOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Eye className="w-4 h-4 sm:w-5 sm:h-5" />} 
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />} 
                         </button>
                       </div>
                     </div>
 
                     {authMode === 'signup' && (
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Confirmar Senha</label>
-                        <div className="relative">
-                          <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
+                      <div className="space-y-2">
+                        <label className="text-[11px] font-black text-[#94A3B8] uppercase tracking-widest ml-1">Confirmar Senha</label>
+                        <div className="relative flex items-center bg-white border border-[#E7ECF3] rounded-[16px] p-1 focus-within:border-[#533FF6] focus-within:ring-1 focus-within:ring-[#533FF6] transition-all">
+                          <div className="bg-[#F8FAFC] p-2.5 rounded-[10px] ml-1">
+                            <Lock className="w-4 h-4 text-[#94A3B8]" />
+                          </div>
                           <input 
                             name="senhaConfirmacao"
                             type={showPassword ? 'text' : 'password'} 
                             required
                             placeholder="••••••••"
-                            className="w-full pl-12 pr-4 py-3 sm:py-4 bg-slate-50 border-none rounded-xl sm:rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                            className="w-full pl-3 pr-4 py-3 bg-transparent border-none text-[14px] text-[#1D293D] placeholder:text-[#94A3B8] focus:ring-0 outline-none"
                           />
                         </div>
                       </div>
                     )}
 
-                    <button 
-                      type="submit"
-                      disabled={authLoading}
-                      className="w-full py-3 sm:py-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl sm:rounded-2xl font-bold transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 active:scale-[0.98]"
-                    >
-                      {authLoading ? (
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      ) : (
-                        <>
-                          {authMode === 'login' ? 'Entrar no Sistema' : 'Criar Conta'}
-                          <LogIn className="w-5 h-5" />
-                        </>
-                      )}
-                    </button>
-                  </form>
-
-                  <div className="mt-8 pt-8 border-t border-slate-100 text-center">
-                    <p className="text-sm text-slate-500 font-medium">
-                      {authMode === 'login' ? 'Não tem uma conta?' : 'Já tem uma conta?'}
+                    <div className="flex items-center justify-between pt-1 pb-2">
                       <button 
+                        type="button"
+                        className="text-[12px] font-black text-[#45556C] hover:text-[#1D293D] transition-colors"
+                      >
+                        Esqueci a senha
+                      </button>
+                      <button 
+                        type="button"
                         onClick={() => {
                           setAuthMode(authMode === 'login' ? 'signup' : 'login');
                           setAuthError(null);
                         }}
-                        className="ml-2 font-bold text-indigo-600 hover:underline"
+                        className="text-[12px] font-black text-[#533FF6] hover:text-indigo-700 transition-colors"
                       >
-                        {authMode === 'login' ? 'Cadastre-se' : 'Faça login'}
+                        {authMode === 'login' ? 'Criar conta' : 'Fazer login'}
                       </button>
-                    </p>
+                    </div>
+
+                    <button 
+                      type="submit"
+                      disabled={authLoading}
+                      className="w-full h-[56px] bg-[#533FF6] hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-[18px] font-black text-[16px] transition-all shadow-[0_10px_18px_rgba(83,63,246,0.16)] flex items-center justify-center gap-2 active:scale-[0.98]"
+                    >
+                      {authLoading ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        authMode === 'login' ? 'Entrar' : 'Criar Conta'
+                      )}
+                    </button>
+                  </form>
+
+                  <div className="flex items-center gap-3 my-6">
+                    <div className="flex-1 h-[1px] bg-[#EEF2F7]"></div>
+                    <span className="text-[12px] text-[#94A3B8] font-medium">ou</span>
+                    <div className="flex-1 h-[1px] bg-[#EEF2F7]"></div>
                   </div>
+
+                  <button 
+                    type="button"
+                    className="w-full h-[52px] bg-[#F8FAFC] border border-[#E7ECF3] hover:bg-slate-100 text-[#45556C] rounded-[18px] font-black text-[14px] transition-all flex items-center justify-center gap-2"
+                  >
+                    <Headphones className="w-4 h-4" />
+                    Falar com suporte
+                  </button>
                 </div>
               </div>
             </motion.div>
@@ -1718,369 +1768,398 @@ export default function App() {
                   <div className="max-w-[1600px] mx-auto p-4 sm:p-8">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                       {/* Left 2/3: Open PDVs */}
-                      <div className="lg:col-span-2 space-y-8">
-                        <div className="flex items-center justify-between">
+                      <div className="lg:col-span-2 bg-white border border-[#D9E2EC] rounded-[22px] p-4 sm:p-6 shadow-sm">
+                        <div className="flex items-start justify-between mb-6">
                           <div>
-                            <h2 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
-                              <Store className="w-8 h-8 text-indigo-600" />
-                              Caixas Abertos
-                            </h2>
-                            <p className="text-slate-500 font-medium mt-1">Sessões de venda ativas no momento</p>
+                            <h2 className="text-[20px] font-black text-[#1D293D] tracking-tight">Caixas abertos</h2>
+                            <p className="text-[13px] text-[#62748E] font-medium mt-1">Selecione um caixa para continuar as vendas</p>
                           </div>
-                          <button 
-                            onClick={fetchPdvsAbertos}
-                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
-                            title="Atualizar"
-                          >
-                            <RefreshCw className={`w-5 h-5 ${pdvLoading ? 'animate-spin' : ''}`} />
-                          </button>
+                          <div className="bg-[#ECFDF5] px-3 py-1.5 rounded-[14px]">
+                            <span className="text-[11px] font-black text-[#15803D]">Operação ativa</span>
+                          </div>
                         </div>
 
                         {pdvLoading ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {[1, 2, 3, 4].map((i) => (
-                              <div key={i} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-pulse">
-                                <div className="flex items-center gap-4 mb-4">
-                                  <div className="w-12 h-12 bg-slate-100 rounded-2xl" />
-                                  <div className="flex-1 space-y-2">
-                                    <div className="h-4 bg-slate-100 rounded w-3/4" />
-                                    <div className="h-3 bg-slate-100 rounded w-1/2" />
-                                  </div>
-                                </div>
-                                <div className="h-10 bg-slate-50 rounded-xl" />
-                              </div>
-                            ))}
+                          <div className="flex justify-center py-12">
+                            <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin" />
                           </div>
                         ) : pdvsAbertos.length > 0 ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-4">
                             {pdvsAbertos.map((pdv) => (
                               <motion.div 
                                 key={pdv.id}
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group"
+                                className="bg-white border border-[#D9E2EC] rounded-[18px] p-4 hover:shadow-md transition-all"
                               >
-                                <div className="flex items-center justify-between mb-4">
-                                  <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                                      <User className="w-6 h-6" />
-                                    </div>
-                                    <div>
-                                      <h4 className="font-black text-slate-800">{pdv.usuario}</h4>
-                                      <p className="text-xs text-slate-400 font-medium">{pdv.filialPdv}</p>
-                                    </div>
-                                  </div>
-                                  <div className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-wider">
-                                    Aberto
+                                {/* Top */}
+                                <div className="flex items-center justify-between mb-3">
+                                  <h4 className="text-[16px] font-black text-[#1D293D] truncate pr-4">{pdv.filialPdv}</h4>
+                                  <div className={`px-3 py-1.5 rounded-[12px] flex-shrink-0 ${pdv.aberto ? 'bg-[#ECFDF5]' : 'bg-[#FEF2F2]'}`}>
+                                    <span className={`text-[11px] font-black ${pdv.aberto ? 'text-[#15803D]' : 'text-rose-600'}`}>
+                                      {pdv.aberto ? 'Aberto' : 'Fechado'}
+                                    </span>
                                   </div>
                                 </div>
                                 
-                                <div className="space-y-3 mb-6">
-                                  <div className="flex items-center justify-between text-xs">
-                                    <span className="text-slate-400 font-medium">Abertura</span>
-                                    <span className="text-slate-700 font-bold">{new Date(pdv.createAt).toLocaleString()}</span>
-                                  </div>
-                                  <div className="flex items-center justify-between text-xs">
-                                    <span className="text-slate-400 font-medium">Período</span>
-                                    <span className="text-slate-700 font-bold">{pdv.descricaoPeriodo}</span>
-                                  </div>
-                                  {pdv.descricao && (
-                                    <div className="p-3 bg-slate-50 rounded-xl text-[11px] text-slate-500 font-medium italic">
-                                      "{pdv.descricao}"
+                                {/* Divider */}
+                                <div className="h-[1px] bg-[#E7ECF3] w-full mb-3" />
+                                
+                                {/* Infos */}
+                                <div className="space-y-2 mb-3">
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {/* Operador */}
+                                    <div className="bg-[#F8FAFC] rounded-[14px] p-3 flex items-center gap-2">
+                                      <User className="w-4 h-4 text-[#533FF6] flex-shrink-0" />
+                                      <div className="flex flex-col overflow-hidden">
+                                        <span className="text-[10px] font-black text-[#94A3B8] tracking-widest">OPERADOR</span>
+                                        <span className="text-[13px] font-black text-[#45556C] truncate">{pdv.usuario}</span>
+                                      </div>
                                     </div>
-                                  )}
+                                    {/* Período */}
+                                    <div className="bg-[#F8FAFC] rounded-[14px] p-3 flex items-center gap-2">
+                                      <Clock className="w-4 h-4 text-[#533FF6] flex-shrink-0" />
+                                      <div className="flex flex-col overflow-hidden">
+                                        <span className="text-[10px] font-black text-[#94A3B8] tracking-widest">PERÍODO</span>
+                                        <span className="text-[13px] font-black text-[#45556C] truncate">{pdv.descricaoPeriodo}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {/* Abertura */}
+                                  <div className="bg-[#F8FAFC] rounded-[14px] p-3 flex items-center gap-2">
+                                    <Calendar className="w-4 h-4 text-[#533FF6] flex-shrink-0" />
+                                    <div className="flex flex-col overflow-hidden">
+                                      <span className="text-[10px] font-black text-[#94A3B8] tracking-widest">ABERTURA</span>
+                                      <span className="text-[13px] font-black text-[#45556C] truncate">{new Date(pdv.createAt).toLocaleString('pt-BR')}</span>
+                                    </div>
+                                  </div>
                                 </div>
-
+                                
+                                {/* Button */}
                                 <button 
                                   onClick={() => {
                                     setSelectedPdvSession(pdv);
                                     setPdvSubView('gestaoPedidos');
                                   }}
-                                  className="w-full py-3 bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-600 rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+                                  className="w-full h-[48px] bg-[#2E8B57] hover:bg-[#27784A] text-white rounded-[16px] font-black text-[15px] transition-all flex items-center justify-center"
                                 >
-                                  Assumir Caixa
-                                  <ChevronRight className="w-4 h-4" />
+                                  Realizar vendas
                                 </button>
                               </motion.div>
                             ))}
                           </div>
                         ) : (
-                          <div className="py-20 text-center text-slate-400 bg-white rounded-[2.5rem] border border-dashed border-slate-200">
-                            <Store className="w-16 h-16 mx-auto mb-4 opacity-10" />
-                            <p className="text-lg font-black text-slate-800">Nenhum caixa aberto</p>
-                            <p className="text-sm font-medium">Inicie uma nova sessão no painel ao lado.</p>
+                          <div className="py-12 text-center">
+                            <h3 className="text-[16px] font-black text-[#1D293D] mb-1">Nenhum caixa aberto encontrado</h3>
+                            <p className="text-[13px] text-[#62748E] font-medium">Abra um novo caixa para iniciar as vendas</p>
                           </div>
                         )}
                       </div>
 
                       {/* Right 1/3: PDV Actions */}
-                      <div className="space-y-6">
-                        <div className="bg-indigo-600 p-8 rounded-[2rem] text-white shadow-2xl shadow-indigo-200 relative overflow-hidden group">
-                          <div className="relative z-10">
-                            <h3 className="text-2xl font-black mb-2">Novo Caixa</h3>
-                            <p className="text-indigo-100 text-sm font-medium mb-6">Inicie uma nova sessão de vendas agora.</p>
-                            <button 
-                              onClick={() => setIsNewPdvModalOpen(true)}
-                              className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black shadow-lg hover:bg-indigo-50 transition-all active:scale-95 flex items-center justify-center gap-2"
-                            >
-                              <Plus className="w-5 h-5" />
-                              Abrir Caixa
-                            </button>
+                      <div className="space-y-3">
+                        {/* Novo Caixa */}
+                        <button 
+                          onClick={() => setIsNewPdvModalOpen(true)}
+                          className="w-full bg-white border border-[#E7ECF3] rounded-[18px] p-4 flex items-center gap-3 hover:shadow-md transition-all text-left"
+                        >
+                          <div className="bg-[#ECFDF5] p-2.5 rounded-[14px] flex-shrink-0">
+                            <Plus className="w-5 h-5 text-[#15803D]" />
                           </div>
-                          <Box className="absolute -right-8 -bottom-8 w-48 h-48 text-white/10 rotate-12 group-hover:rotate-0 transition-transform duration-500" />
-                        </div>
+                          <div className="flex-1 overflow-hidden">
+                            <h4 className="text-[15px] font-black text-[#1D293D]">Novo caixa</h4>
+                            <p className="text-[13px] text-[#62748E] font-medium truncate">Abra um caixa para realizar vendas</p>
+                          </div>
+                          <ChevronRight className="w-6 h-6 text-[#94A3B8] flex-shrink-0" />
+                        </button>
 
-                        <div className="grid grid-cols-1 gap-4">
-                          <button className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 group">
-                            <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                              <Search className="w-6 h-6" />
-                            </div>
-                            <div>
-                              <h4 className="font-black text-slate-800">Consultas Detalhadas</h4>
-                              <p className="text-xs text-slate-400 font-medium">Histórico e relatórios de vendas</p>
-                            </div>
-                          </button>
-
-                          <button 
-                            onClick={() => {
-                              setCurrentView('people');
-                              setPeopleSubView('posUsers');
-                            }}
-                            className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 group"
-                          >
-                            <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                              <ShieldCheck className="w-6 h-6" />
-                            </div>
-                            <div>
-                              <h4 className="font-black text-slate-800">Usuários PDV</h4>
-                              <p className="text-xs text-slate-400 font-medium">Gerenciar permissões e acessos</p>
-                            </div>
-                          </button>
-                        </div>
+                        {/* Usuários PDV */}
+                        <button 
+                          onClick={() => {
+                            setCurrentView('people');
+                            setPeopleSubView('posUsers');
+                          }}
+                          className="w-full bg-white border border-[#E7ECF3] rounded-[18px] p-4 flex items-center gap-3 hover:shadow-md transition-all text-left"
+                        >
+                          <div className="bg-[#EFF6FF] p-2.5 rounded-[14px] flex-shrink-0">
+                            <User className="w-5 h-5 text-[#3B82F6]" />
+                          </div>
+                          <div className="flex-1 overflow-hidden">
+                            <h4 className="text-[15px] font-black text-[#1D293D]">Usuários ponto de venda</h4>
+                            <p className="text-[13px] text-[#62748E] font-medium truncate">Gerencie usuários e acessos ao caixa</p>
+                          </div>
+                          <ChevronRight className="w-6 h-6 text-[#94A3B8] flex-shrink-0" />
+                        </button>
                       </div>
                     </div>
                   </div>
                 )}
 
                 {pdvSubView === 'gestaoPedidos' && (
-                  <div className="max-w-[1600px] mx-auto p-4 sm:p-8 space-y-8">
-                    {/* Summary Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-                      {[
-                        { label: 'Abertos', value: pedidos.filter(p => !p.finalizado && !p.cancelado).length, icon: Clock, color: 'bg-indigo-50 text-indigo-600' },
-                        { label: 'Finalizados', value: pedidos.filter(p => p.finalizado && !p.cancelado).length, icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-600' },
-                        { label: 'Cancelados', value: pedidos.filter(p => p.cancelado).length, icon: XCircle, color: 'bg-rose-50 text-rose-600' },
-                        { 
-                          label: 'Ticket Médio', 
-                          value: new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
-                            pedidos.filter(p => p.finalizado && !p.cancelado).length > 0
-                              ? pedidos.filter(p => p.finalizado && !p.cancelado).reduce((acc, curr) => acc + curr.totalPedido, 0) / pedidos.filter(p => p.finalizado && !p.cancelado).length
-                              : 0
-                          ), 
-                          icon: TrendingUp, 
-                          color: 'bg-amber-50 text-amber-600' 
-                        },
-                      ].map((stat, i) => (
-                        <motion.div
-                          key={stat.label}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.1 }}
-                          className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex items-center gap-4"
-                        >
-                          <div className={`p-4 rounded-2xl ${stat.color}`}>
-                            <stat.icon className="w-6 h-6" />
+                  <div className="flex flex-col h-full bg-[#F8F9FA] relative">
+                    <div className="flex-1 overflow-y-auto p-4 sm:p-8 pb-24 sm:pb-8">
+                      <div className="max-w-[1600px] mx-auto space-y-6">
+                        
+                        {/* Header Info */}
+                        <div className="flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0 pt-2">
+                          <div className="flex flex-col items-center sm:items-start space-y-2">
+                            <h2 className="text-[18px] font-black text-[#1D293D] font-montserrat">
+                              {selectedPdvSession?.filialPdv || 'Ponto de Venda'}
+                            </h2>
+                            <div className="bg-white border border-[#45556C]/10 rounded-[40px] p-2.5 shadow-[0_10px_18px_rgba(0,0,0,0.03)] flex flex-wrap items-center justify-center gap-2 sm:gap-4">
+                              {/* Chips */}
+                              <div className="flex items-center gap-1.5 bg-[#F8FAFC] px-3 py-1.5 rounded-full">
+                                <Clock className="w-4 h-4 text-[#533FF6]" />
+                                <span className="text-[12px] font-bold text-[#45556C]">{selectedPdvSession?.descricaoPeriodo || 'Período'}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 bg-[#F8FAFC] px-3 py-1.5 rounded-full">
+                                <Calendar className="w-4 h-4 text-[#533FF6]" />
+                                <span className="text-[12px] font-bold text-[#45556C]">
+                                  {selectedPdvSession ? new Date(selectedPdvSession.createAt).toLocaleString('pt-BR') : ''}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 bg-[#F8FAFC] px-3 py-1.5 rounded-full">
+                                <User className="w-4 h-4 text-[#533FF6]" />
+                                <span className="text-[12px] font-bold text-[#45556C]">{selectedPdvSession?.usuario || 'Usuário'}</span>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{stat.label}</p>
-                            <p className="text-2xl font-black text-slate-800">{stat.value}</p>
+
+                          {/* Desktop Novo Pedido Button */}
+                          <div className="hidden sm:block">
+                            <button
+                              onClick={() => setPdvSubView('novoPedido')}
+                              className="bg-[#2E8B57] text-white h-[50px] px-6 rounded-[16px] text-[16px] font-medium shadow-[0_8px_16px_rgba(46,139,87,0.2)] hover:bg-[#27784A] transition-all flex items-center justify-center gap-2"
+                            >
+                              + Novo Pedido
+                            </button>
                           </div>
-                        </motion.div>
-                      ))}
-                    </div>
-
-                    {/* Filters & Search */}
-                    <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-                      <div className="flex bg-slate-100 p-1 rounded-2xl w-full sm:w-auto overflow-x-auto">
-                        {['Todos', 'Abertos', 'Finalizados', 'Cancelados'].map((filter) => (
-                          <button
-                            key={filter}
-                            onClick={() => setOrderFilter(filter as any)}
-                            className={`px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${
-                              orderFilter === filter ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                            }`}
-                          >
-                            {filter}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex gap-4 w-full sm:w-auto">
-                        <div className="relative flex-1 sm:w-64">
-                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                          <input
-                            type="text"
-                            placeholder="Buscar pedido..."
-                            value={orderSearch}
-                            onChange={(e) => setOrderSearch(e.target.value)}
-                            className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                          />
-                        </div>
-                        <button 
-                          onClick={() => setPdvSubView('novoPedido')}
-                          className="px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold flex items-center gap-2 hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
-                        >
-                          <Plus className="w-5 h-5" />
-                          <span className="hidden sm:inline">Novo Pedido</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Orders Table */}
-                    <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="bg-slate-50/50">
-                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Pedido</th>
-                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Mesa/Cliente</th>
-                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Abertura</th>
-                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest">Status</th>
-                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-right">Total</th>
-                              <th className="px-6 py-5 text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Ações</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {orderLoading ? (
-                              <tr>
-                                <td colSpan={6} className="px-6 py-12 text-center text-slate-400 font-medium">Carregando pedidos...</td>
-                              </tr>
-                            ) : pedidos.length === 0 ? (
-                              <tr>
-                                <td colSpan={6} className="px-6 py-12 text-center text-slate-400 font-medium">Nenhum pedido encontrado.</td>
-                              </tr>
-                            ) : pedidos
-                              .filter(p => {
-                                if (orderFilter === 'Abertos') return !p.finalizado && !p.cancelado;
-                                if (orderFilter === 'Finalizados') return p.finalizado && !p.cancelado;
-                                if (orderFilter === 'Cancelados') return p.cancelado;
-                                return true;
-                              })
-                              .filter(p => p.numeroPedido.toLowerCase().includes(orderSearch.toLowerCase()))
-                              .map((pedido) => (
-                              <tr key={pedido.id} className="hover:bg-slate-50/50 transition-colors group">
-                                <td className="px-6 py-5">
-                                  <span className="font-black text-slate-700">#{pedido.numeroPedido}</span>
-                                </td>
-                                <td className="px-6 py-5">
-                                  <span className="text-sm font-bold text-slate-600">{pedido.mesaCliente || '-'}</span>
-                                </td>
-                                <td className="px-6 py-5">
-                                  <span className="text-sm text-slate-500">{new Date(pedido.abertura).toLocaleString('pt-BR')}</span>
-                                </td>
-                                <td className="px-6 py-5">
-                                  {pedido.cancelado ? (
-                                    <span className="px-3 py-1 bg-rose-50 text-rose-600 rounded-full text-xs font-black uppercase tracking-wider">Cancelado</span>
-                                  ) : pedido.finalizado ? (
-                                    <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-xs font-black uppercase tracking-wider">Finalizado</span>
-                                  ) : (
-                                    <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-black uppercase tracking-wider">Aberto</span>
-                                  )}
-                                </td>
-                                <td className="px-6 py-5 text-right">
-                                  <span className="font-black text-slate-800">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(pedido.totalPedido)}</span>
-                                </td>
-                                <td className="px-6 py-5">
-                                  <div className="flex justify-center">
-                                    <button 
-                                      onClick={() => {
-                                        setSelectedOrder(pedido);
-                                        setPdvSubView('orderDetails');
-                                      }}
-                                      className="p-2 hover:bg-white hover:shadow-md rounded-xl text-slate-400 hover:text-indigo-600 transition-all"
-                                    >
-                                      <ChevronRight className="w-5 h-5" />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {pdvSubView === 'novoPedido' && (
-                  <div className="max-w-[1600px] mx-auto p-4 sm:p-8 flex items-center justify-center min-h-[60vh]">
-                    <motion.div 
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="bg-white p-8 sm:p-12 rounded-[3rem] shadow-xl border border-slate-100 w-full max-w-2xl"
-                    >
-                      <div className="flex items-center gap-6 mb-12">
-                        <div className="p-5 bg-indigo-50 rounded-3xl text-indigo-600">
-                          <ShoppingBag className="w-8 h-8" />
-                        </div>
-                        <div>
-                          <h2 className="text-3xl font-black text-slate-800">Novo Pedido</h2>
-                          <p className="text-slate-400 font-medium">Inicie uma nova venda no balcão</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-8">
-                        <div className="space-y-3">
-                          <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Mesa / Cliente</label>
-                          <input
-                            type="text"
-                            value={newOrderMesaCliente}
-                            onChange={(e) => setNewOrderMesaCliente(e.target.value)}
-                            placeholder="Ex: Mesa 05 ou Nome do Cliente"
-                            className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-lg font-bold focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-                          />
                         </div>
 
-                        <div className="space-y-3">
-                          <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Categoria de Preço</label>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {priceCategories.map((cat) => (
+                        {/* Search and Tabs Container */}
+                        <div className="flex flex-col space-y-4">
+                          {/* Search */}
+                          <div className="bg-white border border-[#E7ECF3] rounded-[24px] p-2 flex items-center shadow-[0_6px_12px_rgba(0,0,0,0.02)]">
+                            <div className="pl-3 pr-2">
+                              <Search className="w-5 h-5 text-[#94A3B8]" />
+                            </div>
+                            <input
+                              type="text"
+                              placeholder="Buscar por número do pedido..."
+                              value={orderSearch}
+                              onChange={(e) => setOrderSearch(e.target.value)}
+                              className="flex-1 bg-transparent border-none text-[14px] font-medium text-[#1D293D] placeholder-[#94A3B8] focus:ring-0 outline-none"
+                            />
+                          </div>
+
+                          {/* Tabs */}
+                          <div className="bg-[#F8FAFC] p-1 rounded-[34px] flex w-full overflow-x-auto hide-scrollbar">
+                            {['Todos', 'Abertos', 'Finalizados', 'Cancelados'].map((filter) => (
                               <button
-                                key={cat.id}
-                                onClick={() => setSelectedPriceCategoryId(cat.id)}
-                                className={`px-6 py-4 rounded-2xl text-sm font-black transition-all border-2 ${
-                                  selectedPriceCategoryId === cat.id
-                                    ? 'bg-indigo-50 border-indigo-600 text-indigo-600'
-                                    : 'bg-white border-slate-100 text-slate-500 hover:border-slate-200'
+                                key={filter}
+                                onClick={() => setOrderFilter(filter as any)}
+                                className={`flex-1 min-w-[100px] py-2.5 px-4 rounded-[24px] text-[14px] font-black transition-all ${
+                                  orderFilter === filter 
+                                    ? 'bg-white text-[#533FF6] border border-[#EEF2F7] shadow-[0_6px_14px_rgba(0,0,0,0.05)]' 
+                                    : 'text-[#7E8DA1] hover:text-[#533FF6] bg-transparent'
                                 }`}
                               >
-                                {cat.categoriaPreco}
+                                {filter}
                               </button>
                             ))}
                           </div>
                         </div>
 
-                        <div className="flex gap-4 pt-6">
-                          <button
-                            onClick={() => setPdvSubView('gestaoPedidos')}
-                            className="flex-1 py-5 bg-slate-100 text-slate-600 rounded-2xl font-black hover:bg-slate-200 transition-all"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            onClick={handleCreateOrder}
-                            disabled={orderLoading}
-                            className="flex-[2] py-5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-3"
-                          >
-                            {orderLoading ? 'Gerando...' : (
-                              <>
-                                <CheckCircle2 className="w-6 h-6" />
-                                Gerar Novo Pedido
-                              </>
-                            )}
-                          </button>
+                        {/* Orders List */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                          {orderLoading ? (
+                            <div className="col-span-full py-12 text-center text-slate-400 font-medium">Carregando pedidos...</div>
+                          ) : (() => {
+                            const filteredPedidos = pedidos.filter(p => {
+                              if (orderFilter === 'Abertos') return !p.finalizado && !p.cancelado;
+                              if (orderFilter === 'Finalizados') return p.finalizado && !p.cancelado;
+                              if (orderFilter === 'Cancelados') return p.cancelado;
+                              return true;
+                            }).filter(p => {
+                              if (!orderSearch) return true;
+                              return p.numeroPedido?.toString().includes(orderSearch);
+                            });
+
+                            if (filteredPedidos.length === 0) {
+                              return <div className="col-span-full py-12 text-center text-slate-400 font-medium">Nenhum pedido encontrado para este filtro.</div>;
+                            }
+
+                            return filteredPedidos.map((pedido) => (
+                            <div 
+                              key={pedido.id} 
+                              onClick={() => {
+                                setSelectedOrder(pedido);
+                                setPdvSubView('orderDetails');
+                              }}
+                              className="bg-white border border-[#E7ECF3] rounded-[22px] p-4 shadow-[0_8px_18px_rgba(0,0,0,0.04)] cursor-pointer hover:shadow-md transition-all"
+                            >
+                              {/* Top */}
+                              <div className="flex justify-between items-start mb-3.5">
+                                <div className="space-y-2">
+                                  <h3 className="text-[17px] font-black text-[#1D293D]">Pedido #{pedido.numeroPedido}</h3>
+                                  <div className="inline-block bg-[#F3F0FF] px-2.5 py-1 rounded-[14px]">
+                                    <span className="text-[11px] font-black text-[#533FF6]">{pedido.nomeCategoriaPreco || '-'}</span>
+                                  </div>
+                                </div>
+                                <div className={`px-2.5 py-1 rounded-[14px] ${
+                                  pedido.cancelado ? 'bg-[#FEF2F2]' : 
+                                  pedido.finalizado ? 'bg-[#DBEAFE]' : 'bg-[#ECFDF5]'
+                                }`}>
+                                  <span className={`text-[11px] font-black ${
+                                    pedido.cancelado ? 'text-rose-600' : 
+                                    pedido.finalizado ? 'text-[#372AAC]' : 'text-[#15803D]'
+                                  }`}>
+                                    {pedido.cancelado ? 'Cancelado' : pedido.finalizado ? 'Finalizado' : 'Aberto'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Divider */}
+                              <div className="h-[1px] bg-[#EEF2F7] w-full mb-3.5" />
+
+                              {/* Content */}
+                              <div className="flex justify-between items-center">
+                                <div className="space-y-2.5">
+                                  {/* Abertura */}
+                                  <div className="flex items-center gap-2">
+                                    <div className="bg-[#F8FAFC] p-2 rounded-[12px]">
+                                      <Calendar className="w-4 h-4 text-[#533FF6]" />
+                                    </div>
+                                    <div className="flex flex-col">
+                                      <span className="text-[10px] font-black text-[#94A3B8]">ABERTURA</span>
+                                      <span className="text-[13px] font-black text-[#45556C]">{new Date(pedido.abertura).toLocaleString('pt-BR')}</span>
+                                    </div>
+                                  </div>
+                                  {/* Operador */}
+                                  <div className="flex items-center gap-2">
+                                    <div className="bg-[#F8FAFC] p-2 rounded-[12px]">
+                                      <User className="w-4 h-4 text-[#533FF6]" />
+                                    </div>
+                                    <div className="flex flex-col">
+                                      <span className="text-[10px] font-black text-[#94A3B8]">OPERADOR</span>
+                                      <span className="text-[13px] font-black text-[#45556C] truncate max-w-[120px]">{pedido.nomeUsuarioRegistro || '-'}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Total */}
+                                <div className="flex flex-col items-end justify-center">
+                                  <span className="text-[10px] font-black text-[#94A3B8] tracking-wider">TOTAL</span>
+                                  <span className="text-[19px] font-black text-[#1D293D]">
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(pedido.totalPedido)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            ));
+                          })()}
                         </div>
                       </div>
-                    </motion.div>
+                    </div>
+
+                    {/* Fixed Bottom Button on Mobile ONLY */}
+                    <div className="sm:hidden fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#F8F9FA] via-[#F8F9FA] to-transparent z-10">
+                      <button
+                        onClick={() => setPdvSubView('novoPedido')}
+                        className="w-full bg-[#2E8B57] text-white h-[60px] px-8 rounded-[20px] text-[20px] font-medium shadow-[0_10px_18px_rgba(46,139,87,0.2)] hover:bg-[#27784A] transition-all flex items-center justify-center gap-2"
+                      >
+                        + Novo Pedido
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {pdvSubView === 'novoPedido' && (
+                  <div className="flex flex-col h-full bg-[#F8F9FA] relative">
+                    <div className="flex-1 overflow-y-auto p-4 sm:p-8">
+                      <div className="max-w-3xl mx-auto space-y-4">
+                        
+                        {/* Header */}
+                        <div className="flex items-center justify-between mb-2">
+                          <button 
+                            onClick={() => setPdvSubView('gestaoPedidos')}
+                            className="w-[42px] h-[42px] bg-white border border-[#E7ECF3] rounded-[14px] flex items-center justify-center shadow-[0_6px_12px_rgba(0,0,0,0.04)] hover:bg-slate-50 transition-colors"
+                          >
+                            <ArrowLeft className="w-5 h-5 text-[#45556C]" />
+                          </button>
+                          
+                          <div className="flex flex-col items-center">
+                            <h2 className="text-[20px] font-black text-[#1D293D] font-montserrat">Gerar Novo Pedido</h2>
+                            <p className="text-[12px] text-[#94A3B8] font-medium">Identifique o pedido e selecione a categoria de preço</p>
+                          </div>
+                          
+                          <div className="w-[42px]" /> {/* Spacer for balance */}
+                        </div>
+
+                        {/* Card Identificação */}
+                        <div className="bg-white border border-[#E7ECF3] rounded-[24px] p-4 shadow-[0_10px_18px_rgba(0,0,0,0.04)]">
+                          <div className="space-y-1 mb-3">
+                            <h3 className="text-[16px] font-black text-[#1D293D]">Identificação do Pedido</h3>
+                            <p className="text-[12px] text-[#94A3B8]">Informe o número do pedido ou o nome do cliente</p>
+                          </div>
+                          
+                          <div className="bg-[#F8FAFC] border border-[#E7ECF3] rounded-[18px] p-3 flex items-center gap-3">
+                            <div className="w-[34px] h-[34px] bg-[#F3F0FF] rounded-[12px] flex items-center justify-center flex-shrink-0">
+                              <ShoppingBag className="w-4 h-4 text-[#533FF6]" />
+                            </div>
+                            <input
+                              type="text"
+                              value={newOrderMesaCliente}
+                              onChange={(e) => setNewOrderMesaCliente(e.target.value)}
+                              placeholder="Digite número ou nome do cliente"
+                              className="flex-1 bg-transparent border-none text-[14px] font-black text-[#1D293D] placeholder-[#94A3B8] focus:ring-0 outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Lista de Categorias */}
+                        <div className="space-y-3 pt-2">
+                          {priceCategories.map((cat) => (
+                            <div 
+                              key={cat.id}
+                              className="bg-white border border-[#E7ECF3] rounded-[22px] p-4 shadow-[0_8px_18px_rgba(0,0,0,0.04)] flex items-center gap-3.5"
+                            >
+                              <div className="w-[46px] h-[46px] bg-[#F3F0FF] rounded-[14px] flex items-center justify-center flex-shrink-0">
+                                <ShoppingBag className="w-5 h-5 text-[#533FF6]" />
+                              </div>
+                              
+                              <div className="flex-1 flex flex-col justify-center">
+                                <h4 className="text-[16px] font-black text-[#1D293D] truncate">{cat.categoriaPreco}</h4>
+                                <p className="text-[12px] text-[#94A3B8] truncate">Toque para selecionar esta categoria</p>
+                              </div>
+                              
+                              <button
+                                onClick={() => {
+                                  setSelectedPriceCategoryId(cat.id);
+                                  handleCreateOrder();
+                                }}
+                                disabled={orderLoading}
+                                className="bg-[#F8FAFC] border border-[#E7ECF3] rounded-[14px] px-3 py-2 hover:bg-[#EEF2F7] transition-colors flex-shrink-0"
+                              >
+                                <span className="text-[11px] font-black text-[#45556C]">
+                                  {orderLoading && selectedPriceCategoryId === cat.id ? 'Gerando...' : 'Selecionar'}
+                                </span>
+                              </button>
+                            </div>
+                          ))}
+
+                          {priceCategories.length === 0 && (
+                            <div className="bg-white border border-[#E7ECF3] rounded-[22px] p-6 shadow-[0_6px_16px_rgba(0,0,0,0.03)] flex flex-col items-center text-center mt-2">
+                              <div className="w-[52px] h-[52px] bg-[#F3F0FF] rounded-[18px] flex items-center justify-center mb-3">
+                                <ShoppingBag className="w-6 h-6 text-[#533FF6]" />
+                              </div>
+                              <h4 className="text-[15px] font-black text-[#1D293D] mb-1">Nenhuma categoria encontrada</h4>
+                              <p className="text-[12px] text-[#94A3B8]">Verifique se existem categorias disponíveis para gerar pedidos.</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -2155,7 +2234,7 @@ export default function App() {
                             <h3 className="text-xl font-black text-slate-800">Resumo do Pedido</h3>
                             <span className="px-3 py-1 bg-indigo-100 text-indigo-600 rounded-full text-xs font-black">#{selectedOrder.numeroPedido}</span>
                           </div>
-                          <p className="text-sm text-slate-500 font-medium">{selectedOrder.mesaCliente || 'Balcão'}</p>
+                          <p className="text-sm text-slate-500 font-medium">{selectedOrder.nomeCategoriaPreco || 'Balcão'}</p>
                         </div>
 
                         <div className="flex-grow overflow-y-auto p-6 space-y-4">
@@ -2251,7 +2330,7 @@ export default function App() {
                           <div className="bg-slate-50 p-8 rounded-[2rem] space-y-4">
                             <div className="flex justify-between text-slate-500 font-bold uppercase tracking-widest text-xs">
                               <span>Valor Total</span>
-                              <span>{selectedOrder.mesaCliente || 'Balcão'}</span>
+                              <span>{selectedOrder.nomeCategoriaPreco || 'Balcão'}</span>
                             </div>
                             <div className="text-5xl font-black text-slate-800">
                               {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedOrder.totalPedido)}
