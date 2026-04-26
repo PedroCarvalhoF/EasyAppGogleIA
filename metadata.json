@@ -1,5 +1,5 @@
 {
   "name": "EasyCashier",
   "description": "Sistema de gestão de produtos e categorias com interface centralizada.",
-  "requestFramePermissions": []
+  "requestFramePermissions": ["microphone"]
 }

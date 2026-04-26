@@ -4,8 +4,26 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-primary: #E67E22;
+  --color-primary-soft: #FFF4E8;
+  --color-bg-gray: #F8F9FA;
+  --color-text-strong: #1E293B;
+  --color-text-muted: #64748B;
+  --color-header-dark: #1F2937;
+  --color-success: #0F9F6E;
+  --color-danger: #DC2626;
+  --color-border-light: #E2E8F0;
 }
 
 body {
-  @apply antialiased;
+  @apply antialiased bg-bg-gray text-text-strong selection:bg-primary/20;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
